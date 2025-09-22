@@ -11,7 +11,7 @@ openai-whisper==20231117
 faster-whisper==0.10.0
 torch>=2.7.0
 torchaudio>=2.7.0
-transformers==4.36.2
+transformers==4.53.0
 
 # Text-to-Speech (TTS)
 TTS==0.22.0
