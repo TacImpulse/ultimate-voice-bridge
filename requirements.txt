@@ -21,7 +21,7 @@ festival==2.5.0
 # LLM Integration
 openai==1.6.1
 anthropic==0.7.8
-requests==2.31.0
+requests==2.32.4
 httpx==0.25.2
 
 # Audio Processing
