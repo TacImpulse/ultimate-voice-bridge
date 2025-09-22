@@ -35,4 +35,4 @@ Write-Host ""
 Write-Host "🎯 Pro Tip: Open http://localhost:3001/voice to test your RTX 5090 voice recording!" -ForegroundColor Magenta
 Write-Host ""
 Write-Host "Press any key to exit this window..."
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+$null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')

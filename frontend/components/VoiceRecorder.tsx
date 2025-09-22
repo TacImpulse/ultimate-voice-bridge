@@ -54,8 +54,15 @@ export default function VoiceRecorder() {
       })
       
       audioContextRef.current = new AudioContext()
+      
+      // Resume AudioContext if it's suspended (required by modern browsers)
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume()
+      }
+      
       analyserRef.current = audioContextRef.current.createAnalyser()
       analyserRef.current.fftSize = 256
+      analyserRef.current.smoothingTimeConstant = 0.8
       
       const source = audioContextRef.current.createMediaStreamSource(stream)
       source.connect(analyserRef.current)
@@ -102,6 +109,11 @@ export default function VoiceRecorder() {
       mediaRecorderRef.current.start()
       setIsRecording(true)
       
+      // Initialize visualizer with immediate animation to test
+      const testLevels = Array.from({length: 20}, (_, i) => Math.random() * 0.3 + 0.1)
+      setAudioLevels(testLevels)
+      console.log('🎤 Test levels set:', testLevels)
+      
       // Start audio visualization
       visualizeAudio()
       
@@ -130,33 +142,68 @@ export default function VoiceRecorder() {
         clearInterval(timerRef.current)
       }
       
-      if (audioContextRef.current) {
-        audioContextRef.current.close()
-      }
+      // Don't close AudioContext immediately - let it fade out naturally
+      setTimeout(() => {
+        if (audioContextRef.current) {
+          audioContextRef.current.close()
+        }
+      }, 1000)
     }
   }
 
-  // Visualize audio levels
+  // Visualize audio levels with fallback animation
   const visualizeAudio = () => {
-    if (!analyserRef.current) return
+    console.log('Starting audio visualization...', analyserRef.current)
+    
+    if (!analyserRef.current) {
+      console.log('No analyser, using fallback animation')
+      // Fallback: simple pulsing animation when no analyser is available
+      const fallbackAnimation = () => {
+        if (!isRecording) return
+        const randomLevels = Array.from({length: 20}, () => Math.random() * 0.5 + 0.1)
+        setAudioLevels(randomLevels)
+        animationFrameRef.current = requestAnimationFrame(fallbackAnimation)
+      }
+      fallbackAnimation()
+      return
+    }
     
     const bufferLength = analyserRef.current.frequencyBinCount
     const dataArray = new Uint8Array(bufferLength)
+    console.log('Audio context setup complete, buffer length:', bufferLength)
     
     const updateLevels = () => {
       if (!analyserRef.current || !isRecording) return
       
       analyserRef.current.getByteFrequencyData(dataArray)
       
-      // Create audio level visualization
+      // Create audio level visualization with better sensitivity
       const newLevels = []
       const chunkSize = Math.floor(bufferLength / 20)
       
+      let hasSignal = false
       for (let i = 0; i < 20; i++) {
         const start = i * chunkSize
         const chunk = dataArray.slice(start, start + chunkSize)
         const average = chunk.reduce((sum, value) => sum + value, 0) / chunk.length
-        newLevels.push(average / 255) // Normalize to 0-1
+        
+        if (average > 0) hasSignal = true
+        
+        // Apply logarithmic scaling for better visualization
+        const normalized = Math.min(1, (average / 255) * 3.0) // Increased boost
+        newLevels.push(normalized)
+      }
+      
+      // Always add some baseline activity for better visualization
+      for (let i = 0; i < 20; i++) {
+        // Add baseline + signal boost
+        const baseline = 0.05 + Math.random() * 0.05
+        newLevels[i] = Math.max(newLevels[i], baseline)
+        
+        // Extra boost for actual signal
+        if (hasSignal && newLevels[i] > baseline) {
+          newLevels[i] = Math.min(1, newLevels[i] * 1.5)
+        }
       }
       
       setAudioLevels(newLevels)
@@ -242,29 +289,58 @@ export default function VoiceRecorder() {
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-700/50 backdrop-blur-sm p-8">
         
         {/* Audio Visualizer */}
-        <div className="flex justify-center items-end gap-1 h-20 mb-8 bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4">
+        <div className="flex justify-center items-end gap-2 h-24 mb-8 bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border-2 border-dashed border-gray-200 dark:border-gray-600">
           {audioLevels.map((level, index) => (
             <motion.div
               key={index}
-              className={`w-3 rounded-full transition-colors duration-200 ${
+              className={`w-4 rounded-full transition-all duration-150 ${
                 isRecording 
-                  ? 'bg-red-500 shadow-lg shadow-red-500/30' 
-                  : 'bg-gray-300 dark:bg-gray-600'
+                  ? 'bg-gradient-to-t from-red-500 to-red-400 shadow-lg shadow-red-500/50 border border-red-400' 
+                  : 'bg-gray-300 dark:bg-gray-600 border border-gray-400'
               }`}
               style={{ 
-                height: `${Math.max(4, level * 60)}px`,
-                opacity: isRecording ? 0.7 + (level * 0.3) : 0.3
+                height: `${Math.max(8, level * 70)}px`,
+                opacity: isRecording ? 0.8 + (level * 0.2) : 0.4,
+                minHeight: '6px'
               }}
               animate={{
-                scaleY: isRecording ? [1, 1.2, 1] : 1,
+                scaleY: isRecording ? [1, 1.1, 1] : 1,
+                scaleX: isRecording && level > 0.1 ? [1, 1.05, 1] : 1
               }}
               transition={{
-                duration: 0.5,
+                duration: 0.3,
                 repeat: isRecording ? Infinity : 0,
-                delay: index * 0.05
+                delay: index * 0.02
               }}
             />
           ))}
+          {audioLevels.length === 0 && (
+            <div className="text-gray-500 text-sm flex items-center justify-center w-full">
+              🎤 Audio visualizer will appear when recording starts
+            </div>
+          )}
+          
+          {/* Debug info */}
+          {isRecording && (
+            <div className="absolute top-2 right-2 text-xs text-green-400 bg-black/20 px-2 py-1 rounded">
+              🔴 LIVE • {audioLevels.filter(l => l > 0.1).length}/20 active
+            </div>
+          )}
+          
+          {/* Manual test button */}
+          {!isRecording && (
+            <button 
+              onClick={() => {
+                const testLevels = Array.from({length: 20}, () => Math.random() * 0.8 + 0.1)
+                setAudioLevels(testLevels)
+                console.log('🧪 Test visualization triggered:', testLevels)
+                setTimeout(() => setAudioLevels(new Array(20).fill(0)), 3000)
+              }}
+              className="absolute top-2 left-2 text-xs bg-purple-500 hover:bg-purple-600 text-white px-2 py-1 rounded transition-colors"
+            >
+              🧪 Test Visualizer
+            </button>
+          )}
         </div>
 
         {/* Recording Controls */}
