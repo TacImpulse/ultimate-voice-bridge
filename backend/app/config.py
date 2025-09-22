@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # Server
     backend_host: str = Field(default="0.0.0.0", env="BACKEND_HOST")
-    backend_port: int = Field(default=8000, env="BACKEND_PORT")
+    backend_port: int = Field(default=8001, env="BACKEND_PORT")
     secret_key: str = Field(default="your-super-secret-key-change-this", env="SECRET_KEY")
     
     # Database

@@ -7,7 +7,7 @@ import asyncio
 import io
 import logging
 from contextlib import asynccontextmanager
-from typing import List
+from typing import List, Dict
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
@@ -32,6 +32,15 @@ from models.voice_models import (
     VoiceMessage,
     HealthResponse
 )
+
+# VibeVoice conversation request model
+class VibeVoiceConversationRequest(BaseModel):
+    script: str = Field(..., description="Conversation script with speaker indicators")
+    speaker_voices: Dict[str, str] = Field(
+        default={"Speaker 1": "vibevoice_vibevoice-alice", "Speaker 2": "vibevoice_vibevoice-andrew"}, 
+        description="Mapping of speaker names to voice IDs"
+    )
+    output_format: str = Field(default="wav", description="Output audio format")
 from utils.audio_utils import validate_audio_file
 from utils.logging_config import setup_logging
 
@@ -130,6 +139,9 @@ async def root():
             "tts": "/api/v1/tts", 
             "llm": "/api/v1/llm",
             "voice_chat": "/api/v1/voice-chat",
+            "voice_to_llm": "/api/v1/voice-to-llm",
+            "vibevoice_conversation": "/api/v1/vibevoice-conversation",
+            "vibevoice_voices": "/api/v1/vibevoice-voices",
             "websocket": "/ws",
             "docs": "/docs"
         },
@@ -241,6 +253,74 @@ async def chat_completion(request: LLMRequest):
         raise HTTPException(status_code=500, detail=f"LLM generation failed: {str(e)}")
 
 
+@app.post("/api/v1/voice-to-llm")
+async def voice_to_llm_pipeline(
+    audio: UploadFile = File(..., description="Audio file with user's voice message"),
+    model: str = Form("bytedance/seed-oss-36b", description="LLM model to use"),
+    language: str = Form("auto", description="STT language"),
+    temperature: float = Form(0.7, description="LLM temperature"),
+    max_tokens: int = Form(500, description="Maximum tokens for LLM response"),
+    include_reasoning: bool = Form(True, description="Include reasoning for reasoning models"),
+    use_conversation_history: bool = Form(True, description="Use conversation context")
+):
+    """Voice-to-LLM pipeline: STT -> OSS36B LLM (optimized for voice conversation)"""
+    try:
+        # Step 1: Speech to Text
+        logger.info("🎤 Starting Voice-to-LLM pipeline")
+        audio_data = await audio.read()
+        stt_result = await stt_service.transcribe(audio_data, language=language)
+        
+        if not stt_result.get("text") or not stt_result["text"].strip():
+            raise HTTPException(status_code=400, detail="No speech detected in audio")
+        
+        transcribed_text = stt_result["text"]
+        logger.info(f"📝 Transcribed: '{transcribed_text}'")
+        
+        # Step 2: Generate LLM response with OSS36B
+        messages = [{"role": "user", "content": transcribed_text}]
+        llm_result = await llm_service.generate_response(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            include_reasoning=include_reasoning,
+            use_conversation_history=use_conversation_history
+        )
+        
+        if not llm_result.get("response"):
+            raise HTTPException(status_code=500, detail="LLM failed to generate response")
+        
+        logger.info(f"🤖 LLM Response: '{llm_result['response'][:100]}...'")
+        
+        # Return comprehensive result
+        return {
+            "status": "success",
+            "transcript": {
+                "text": transcribed_text,
+                "language": stt_result.get("language", "unknown"),
+                "confidence": stt_result.get("confidence", 0),
+                "processing_time": stt_result.get("processing_time", 0)
+            },
+            "llm_response": {
+                "text": llm_result["response"],
+                "reasoning": llm_result.get("reasoning", ""),
+                "model": llm_result.get("model", model),
+                "processing_time": llm_result.get("processing_time", 0),
+                "usage": llm_result.get("usage", {}),
+                "finish_reason": llm_result.get("finish_reason", "unknown"),
+                "conversation_length": llm_result.get("conversation_length", 0)
+            },
+            "total_processing_time": stt_result.get("processing_time", 0) + llm_result.get("processing_time", 0),
+            "pipeline_version": "voice-bridge-v1.0"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Voice-to-LLM pipeline error: {e}")
+        raise HTTPException(status_code=500, detail=f"Voice-to-LLM pipeline failed: {str(e)}")
+
+
 @app.post("/api/v1/voice-chat")
 async def voice_chat_pipeline(
     audio: UploadFile = File(..., description="Audio file with user's voice message"),
@@ -250,6 +330,8 @@ async def voice_chat_pipeline(
 ):
     """Complete voice chat pipeline: STT -> LLM -> TTS"""
     try:
+        logger.info("🎤 Starting Voice Chat pipeline (STT + LLM + TTS)")
+        
         # Step 1: Speech to Text
         audio_data = await audio.read()
         stt_result = await stt_service.transcribe(audio_data, language=language)
@@ -257,34 +339,110 @@ async def voice_chat_pipeline(
         if not stt_result.get("text"):
             raise HTTPException(status_code=400, detail="No speech detected in audio")
         
+        logger.info(f"📝 Voice Chat STT result: '{stt_result['text']}'")
+        
         # Step 2: Generate LLM response
-        messages = [{"role": "user", "content": stt_result["text"]}]
+        logger.info(f"🤖 Generating LLM response with model: {model}")
+        
+        # Create a clean conversational prompt
+        messages = [
+            {
+                "role": "system", 
+                "content": "You are Ava, a friendly and helpful AI assistant. Respond in a natural, conversational way. Keep responses concise and engaging. Do not mention technical details, URLs, or system information."
+            },
+            {
+                "role": "user", 
+                "content": stt_result["text"]
+            }
+        ]
+        
         llm_result = await llm_service.generate_response(messages=messages, model=model)
         
         if not llm_result.get("response"):
             raise HTTPException(status_code=500, detail="LLM failed to generate response")
         
+        logger.info(f"🤖 Voice Chat LLM response: '{llm_result['response'][:100]}...'")
+        
         # Step 3: Text to Speech
+        logger.info(f"🎙️ Generating TTS with voice: {voice}")
         tts_audio = await tts_service.generate_speech(
             text=llm_result["response"],
             voice=voice
         )
         
-        # Return combined result
-        return {
-            "transcript": stt_result["text"],
-            "llm_response": llm_result["response"],
-            "audio_response": tts_audio,
-            "processing_time": {
-                "stt": stt_result.get("processing_time", 0),
-                "llm": llm_result.get("processing_time", 0),
-                "tts": await tts_service.get_last_processing_time()
+        logger.info("✅ Voice Chat pipeline completed successfully")
+        
+        # Return audio as streaming response with metadata in headers
+        # Encode Unicode characters for HTTP headers (ASCII/latin-1 compatible)
+        transcript_safe = stt_result["text"].encode('ascii', 'replace').decode('ascii')
+        llm_response_safe = llm_result["response"][:200].encode('ascii', 'replace').decode('ascii')
+        if len(llm_result["response"]) > 200:
+            llm_response_safe += "..."
+        
+        return StreamingResponse(
+            io.BytesIO(tts_audio),
+            media_type="audio/wav",
+            headers={
+                "X-Transcript": transcript_safe,
+                "X-LLM-Response": llm_response_safe,
+                "X-STT-Time": str(stt_result.get("processing_time", 0)),
+                "X-LLM-Time": str(llm_result.get("processing_time", 0)),
+                "X-TTS-Time": str(await tts_service.get_last_processing_time()),
+                "Content-Disposition": "inline; filename=voice_response.wav"
             }
-        }
+        )
         
     except Exception as e:
         logger.error(f"Voice chat pipeline error: {e}")
         raise HTTPException(status_code=500, detail=f"Voice chat failed: {str(e)}")
+
+
+@app.post("/api/v1/vibevoice-conversation")
+async def vibevoice_conversation(request: VibeVoiceConversationRequest):
+    """Create multi-speaker conversations using VibeVoice"""
+    try:
+        if not tts_service.vibevoice_service:
+            raise HTTPException(status_code=503, detail="VibeVoice service not available")
+        
+        logger.info(f"🎭 Creating VibeVoice conversation with {len(request.speaker_voices)} speakers")
+        
+        # Create the conversation using VibeVoice
+        audio_data = await tts_service.vibevoice_service.create_conversation(
+            script=request.script,
+            speaker_voices=request.speaker_voices,
+            output_format=request.output_format
+        )
+        
+        # Return audio as streaming response
+        return StreamingResponse(
+            io.BytesIO(audio_data),
+            media_type=f"audio/{request.output_format}",
+            headers={"Content-Disposition": f"inline; filename=conversation.{request.output_format}"}
+        )
+        
+    except Exception as e:
+        logger.error(f"VibeVoice conversation error: {e}")
+        raise HTTPException(status_code=500, detail=f"VibeVoice conversation failed: {str(e)}")
+
+
+@app.get("/api/v1/vibevoice-voices")
+async def get_vibevoice_voices():
+    """Get available VibeVoice voices"""
+    try:
+        if not tts_service.vibevoice_service:
+            raise HTTPException(status_code=503, detail="VibeVoice service not available")
+        
+        voices = await tts_service.vibevoice_service.get_available_voices()
+        
+        return {
+            "status": "success",
+            "voices": voices,
+            "total_voices": len(voices)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting VibeVoice voices: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get VibeVoice voices: {str(e)}")
 
 
 @app.websocket("/ws")

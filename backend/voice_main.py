@@ -22,6 +22,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from app.config import Settings
 from app.websocket_manager import WebSocketManager
 from services.stt_service import STTService
+from services.llm_service import LLMService
 from utils.audio_utils import validate_audio_file, convert_audio_format, detect_voice_activity, get_audio_info
 
 # Setup logging
@@ -33,6 +34,7 @@ settings = Settings()
 
 # Service instances
 stt_service: STTService = None
+llm_service: LLMService = None
 websocket_manager = WebSocketManager()
 
 
@@ -42,13 +44,17 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting Ultimate Voice Bridge with STT...")
     
-    global stt_service
+    global stt_service, llm_service
     
-    # Initialize STT service
+    # Initialize services
     try:
         stt_service = STTService()
         await stt_service.initialize()
         logger.info("✅ STT Service initialized with GPU support")
+        
+        llm_service = LLMService()
+        await llm_service.initialize()
+        logger.info("✅ LLM Service initialized with LM Studio")
         
         logger.info("🎙️ Ultimate Voice Bridge is ready for voice processing!")
         
@@ -63,6 +69,8 @@ async def lifespan(app: FastAPI):
     
     if stt_service:
         await stt_service.cleanup()
+    if llm_service:
+        await llm_service.cleanup()
     
     logger.info("👋 Ultimate Voice Bridge shutdown complete")
 
@@ -106,6 +114,7 @@ async def root():
         "endpoints": {
             "health": "/health",
             "stt": "/api/v1/stt",
+            "voice_to_llm": "/api/v1/voice-to-llm",
             "stt_info": "/api/v1/stt/info",
             "audio_info": "/api/v1/audio/info",
             "websocket": "/ws",
@@ -224,6 +233,129 @@ async def speech_to_text(
     except Exception as e:
         logger.error(f"❌ STT endpoint error: {e}")
         raise HTTPException(status_code=500, detail=f"Speech transcription failed: {str(e)}")
+
+
+@app.post("/api/v1/voice-to-llm")
+async def voice_to_llm_pipeline(
+    audio: UploadFile = File(..., description="Audio file with user's voice message"),
+    model: str = Form("bytedance/seed-oss-36b", description="LLM model to use"),
+    language: str = Form("auto", description="STT language"),
+    temperature: float = Form(0.7, description="LLM temperature"),
+    max_tokens: int = Form(2000, description="Maximum tokens for LLM response"),
+    include_reasoning: bool = Form(True, description="Include reasoning for reasoning models"),
+    use_conversation_history: bool = Form(True, description="Use conversation context")
+):
+    """🤖 Voice-to-LLM pipeline: STT (RTX 5090) -> OSS36B LLM (LM Studio)
+    
+    Complete pipeline for voice-to-AI conversation:
+    1. Speech-to-Text with GPU acceleration
+    2. LLM processing with ByteDance OSS36B model
+    3. Reasoning and context management
+    """
+    try:
+        # Validate audio file
+        if not validate_audio_file(audio):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid audio file. Supported formats: WAV, MP3, FLAC, OGG, M4A, WebM"
+            )
+        
+        # Read and process audio
+        audio_data = await audio.read()
+        logger.info(f"🎙️ Starting Voice-to-LLM pipeline: {audio.filename} ({len(audio_data)} bytes)")
+        
+        # Get audio information and check voice activity
+        audio_info = get_audio_info(audio_data)
+        voice_activity = detect_voice_activity(audio_data)
+        
+        if not voice_activity['has_voice']:
+            raise HTTPException(
+                status_code=400,
+                detail="No voice activity detected in audio. Please record speech."
+            )
+        
+        # Convert and process audio for STT
+        converted_audio, conversion_info = convert_audio_format(audio_data)
+        
+        # Step 1: Speech to Text with RTX 5090
+        stt_result = await stt_service.transcribe(converted_audio, language=language)
+        
+        if not stt_result.get("text") or not stt_result["text"].strip():
+            raise HTTPException(
+                status_code=400,
+                detail="No speech detected in transcription. Please speak clearly."
+            )
+        
+        transcribed_text = stt_result["text"]
+        logger.info(f"📝 Transcribed: '{transcribed_text}'")
+        
+        # Step 2: Generate LLM response with OSS36B
+        if not llm_service:
+            raise HTTPException(
+                status_code=503,
+                detail="LLM service not available. Make sure LM Studio is running."
+            )
+        
+        messages = [{"role": "user", "content": transcribed_text}]
+        llm_result = await llm_service.generate_response(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            include_reasoning=include_reasoning,
+            use_conversation_history=use_conversation_history
+        )
+        
+        if not llm_result.get("response"):
+            raise HTTPException(
+                status_code=500,
+                detail="LLM failed to generate response. Check LM Studio connection."
+            )
+        
+        logger.info(f"🤖 LLM Response generated: '{llm_result['response'][:100]}...'")
+        
+        # Return comprehensive pipeline result
+        total_time = stt_result.get("processing_time", 0) + llm_result.get("processing_time", 0)
+        
+        return {
+            "status": "success",
+            "transcript": {
+                "text": transcribed_text,
+                "language": stt_result.get("language", "unknown"),
+                "confidence": stt_result.get("confidence", 0),
+                "processing_time": stt_result.get("processing_time", 0),
+                "device_used": stt_result.get("device_used", "unknown")
+            },
+            "llm_response": {
+                "text": llm_result["response"],
+                "reasoning": llm_result.get("reasoning", ""),
+                "model": llm_result.get("model", model),
+                "processing_time": llm_result.get("processing_time", 0),
+                "usage": llm_result.get("usage", {}),
+                "finish_reason": llm_result.get("finish_reason", "unknown"),
+                "conversation_length": llm_result.get("conversation_length", 0)
+            },
+            "audio_analysis": {
+                "audio_info": audio_info,
+                "voice_activity": voice_activity,
+                "conversion_info": conversion_info
+            },
+            "pipeline_performance": {
+                "total_processing_time": total_time,
+                "stt_time_percentage": (stt_result.get("processing_time", 0) / total_time * 100) if total_time > 0 else 0,
+                "llm_time_percentage": (llm_result.get("processing_time", 0) / total_time * 100) if total_time > 0 else 0
+            },
+            "pipeline_version": "voice-bridge-v1.1-gpu"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Voice-to-LLM pipeline error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Voice-to-LLM pipeline failed: {str(e)}"
+        )
 
 
 @app.get("/api/v1/stt/info")
