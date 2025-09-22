@@ -29,7 +29,7 @@
     "typescript",
     "voice-cloning"
   ],
-  "author": "TacIm",
+  "author": "TacImpulse",
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^8.2.2"

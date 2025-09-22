@@ -285,4 +285,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ⭐ **Star this repo if you find it helpful!**
 
-Made with ❤️ by [TacIm](https://github.com/YOUR-USERNAME)
+Made with ❤️ by [TacImpulse](https://github.com/TacImpulse)

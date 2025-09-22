@@ -4,7 +4,8 @@ Application configuration using Pydantic Settings
 
 import os
 from typing import List, Optional
-from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings
+from pydantic import Field
 
 
 class Settings(BaseSettings):
