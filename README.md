@@ -100,7 +100,28 @@ npm run dev:frontend  # http://localhost:3000
 npm run dev:backend   # http://localhost:8000
 ```
 
-### 4. 🐳 Docker (Recommended)
+### 4. 🎤 Quick Start Voice Recording
+
+**PowerShell (Windows):**
+```powershell
+# Start both servers with one script
+.\start-servers.ps1
+```
+
+**Manual Start:**
+```bash
+# Terminal 1: Start backend with GPU support
+cd backend
+python main.py
+
+# Terminal 2: Start frontend 
+cd frontend
+npm run dev
+
+# Open http://localhost:3001/voice to test!
+```
+
+### 5. 🐳 Docker (Production)
 ```bash
 # Start entire stack with one command
 docker-compose up
@@ -111,12 +132,22 @@ docker-compose -f docker-compose.prod.yml up
 
 ## 📱 Usage
 
-### Web Interface
-1. Open http://localhost:3000
-2. Grant microphone permissions
-3. Click "Start Recording" or use push-to-talk
-4. Speak your query
-5. Watch real-time transcription → LLM processing → voice response
+### 🎤 Voice Recording Interface
+1. Open http://localhost:3001/voice
+2. Grant microphone permissions when prompted
+3. Click the red microphone button to start recording
+4. Speak clearly into your microphone
+5. Click stop when finished
+6. Click the document icon to transcribe with RTX 5090 GPU acceleration
+7. View real-time transcription results with technical details
+
+**Features:**
+- Real-time audio visualization with 20-band frequency display
+- Recording timer and audio playback
+- GPU-accelerated Whisper transcription (typically <1 second)
+- Language auto-detection with confidence scores
+- Voice activity detection and silence trimming
+- Professional UI with smooth animations
 
 ### API Endpoints
 ```bash

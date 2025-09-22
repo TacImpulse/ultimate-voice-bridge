@@ -37,24 +37,47 @@ export default function HomePage() {
               ✅ System Ready
             </h2>
             <p><strong>Frontend:</strong> Next.js 14 Running</p>
-            <p><strong>Backend:</strong> FastAPI at port 8000</p>
+            <p><strong>Backend:</strong> FastAPI at port 8001</p>
             <p><strong>GPU:</strong> RTX 5090 Detected (31GB)</p>
             <p><strong>Status:</strong> All systems operational</p>
           </div>
 
           <div style={{ marginTop: '40px' }}>
             <p style={{ marginBottom: '20px' }}>
+              <strong>✅ Completed:</strong>
+            </p>
+            <p>• Voice recording interface with real-time visualization</p>
+            <p>• Whisper STT processing with RTX 5090 GPU acceleration</p>
+            <p style={{ marginTop: '15px', marginBottom: '15px' }}>
               <strong>🚧 Next Steps:</strong>
             </p>
-            <p>• Add voice recording interface</p>
-            <p>• Connect Whisper STT processing</p>
             <p>• Integrate LM Studio for AI responses</p>
             <p>• Add TTS voice synthesis</p>
+            <p>• Create full voice conversation pipeline</p>
           </div>
 
           <div style={{ marginTop: '40px' }}>
             <a 
-              href="http://localhost:8000/docs" 
+              href="/voice" 
+              style={{ 
+                display: 'inline-block',
+                backgroundColor: '#dc2626',
+                color: 'white',
+                padding: '15px 30px',
+                borderRadius: '8px',
+                textDecoration: 'none',
+                margin: '10px',
+                fontWeight: 'bold',
+                fontSize: '1.1rem'
+              }}
+            >
+              🎤 Try Voice Recording
+            </a>
+          </div>
+          
+          <div style={{ marginTop: '20px' }}>
+            <a 
+              href="http://localhost:8001/docs" 
               target="_blank"
               style={{ 
                 display: 'inline-block',
@@ -67,11 +90,11 @@ export default function HomePage() {
                 fontWeight: 'bold'
               }}
             >
-              🔗 API Documentation
+              🔗 STT API Docs
             </a>
             
             <a 
-              href="http://localhost:8000/health" 
+              href="http://localhost:8001/health" 
               target="_blank"
               style={{ 
                 display: 'inline-block',
