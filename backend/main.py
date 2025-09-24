@@ -462,18 +462,34 @@ async def voice_chat_pipeline(
         logger.info("✅ Voice Chat pipeline completed successfully")
         
         # Return audio as streaming response with metadata in headers
-        # Encode Unicode characters for HTTP headers (ASCII/latin-1 compatible)
-        transcript_safe = stt_result["text"].encode('ascii', 'replace').decode('ascii')
-        llm_response_safe = llm_result["response"][:200].encode('ascii', 'replace').decode('ascii')
-        if len(llm_result["response"]) > 200:
-            llm_response_safe += "..."
+        # Clean encoding for HTTP headers (preserve common punctuation)
+        def clean_for_header(text: str, max_length: int = None) -> str:
+            """Clean text for HTTP headers while preserving punctuation"""
+            if not text:
+                return ""
+            
+            # Replace problematic characters but preserve common punctuation
+            text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
+            text = text.replace('\t', ' ')
+            
+            # Remove control characters but keep printable ASCII
+            cleaned = ''.join(char if 32 <= ord(char) <= 126 else ' ' for char in text)
+            
+            # Clean up multiple spaces
+            cleaned = ' '.join(cleaned.split())
+            
+            if max_length and len(cleaned) > max_length:
+                cleaned = cleaned[:max_length].rsplit(' ', 1)[0] + "..."
+            
+            return cleaned
+        
+        transcript_safe = clean_for_header(stt_result["text"])
+        llm_response_safe = clean_for_header(llm_result["response"], 200)
         
         # Include reasoning if available (truncated for header)
         reasoning_safe = ""
         if llm_result.get("reasoning"):
-            reasoning_safe = llm_result["reasoning"][:300].encode('ascii', 'replace').decode('ascii')
-            if len(llm_result["reasoning"]) > 300:
-                reasoning_safe += "..."
+            reasoning_safe = clean_for_header(llm_result["reasoning"], 300)
         
         return StreamingResponse(
             io.BytesIO(tts_audio),
@@ -490,7 +506,9 @@ async def voice_chat_pipeline(
                 "X-STT-Time": str(stt_result.get("processing_time", 0)),
                 "X-LLM-Time": str(llm_result.get("processing_time", 0)),
                 "X-TTS-Time": str(await tts_service.get_last_processing_time()),
-                "Content-Disposition": "inline; filename=voice_response.wav"
+                "Content-Disposition": "inline; filename=voice_response.wav",
+                # CORS headers to allow frontend to access our custom headers
+                "Access-Control-Expose-Headers": "X-Transcript,X-Transcript-Language,X-Transcript-Confidence,X-Transcript-Device,X-LLM-Response,X-LLM-Reasoning,X-LLM-Model,X-LLM-Tokens,X-STT-Time,X-LLM-Time,X-TTS-Time"
             }
         )
         

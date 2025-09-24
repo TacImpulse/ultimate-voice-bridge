@@ -495,6 +495,9 @@ export default function VoiceRecorder() {
       const llmTime = parseFloat(response.headers.get('X-LLM-Time') || '0')
       const ttsTime = parseFloat(response.headers.get('X-TTS-Time') || '0')
       
+      // Debug: Log ALL available headers
+      console.log('🔍 ALL Response Headers:', Array.from(response.headers.entries()))
+      
       console.log('✨ Voice Chat Response received:', { transcript, llmResponse, llmReasoning, sttTime, llmTime, ttsTime })
       console.log('🔍 Enhanced transcription data:', {
         transcript,
