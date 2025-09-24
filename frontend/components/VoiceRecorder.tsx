@@ -42,6 +42,31 @@ export default function VoiceRecorder() {
   const [abortController, setAbortController] = useState<AbortController | null>(null)
   const [showReasoningPanel, setShowReasoningPanel] = useState<boolean>(false)
   const [fullReasoningData, setFullReasoningData] = useState<string>('')
+  const [conversationHistory, setConversationHistory] = useState<Array<{
+    id: string
+    timestamp: Date
+    userInput: string
+    userInputDetails: {
+      language: string
+      confidence: number
+      device: string
+      processingTime: number
+    }
+    aiResponse: string
+    aiReasoning: string
+    aiDetails: {
+      model: string
+      tokens: number
+      processingTime: number
+    }
+    ttsTime: number
+  }>>([])
+  const [showConversationHistory, setShowConversationHistory] = useState<boolean>(false)
+  const [textInput, setTextInput] = useState<string>('')
+  const [showTextInput, setShowTextInput] = useState<boolean>(false)
+  const [realtimeTranscription, setRealtimeTranscription] = useState<string>('')
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
+  const [dragOver, setDragOver] = useState<boolean>(false)
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -65,8 +90,18 @@ export default function VoiceRecorder() {
         const data = await response.json()
         if (data.models && data.models.length > 0) {
           setAvailableModels(data.models)
-          // Set default to current default from backend, or first available
-          setSelectedModel(data.current_default || data.models[0] || 'default')
+          
+          // Check for saved model preference
+          const savedModel = localStorage.getItem('voice-bridge-selected-model')
+          let modelToSelect = data.current_default || data.models[0] || 'default'
+          
+          // Use saved model if it's still available
+          if (savedModel && data.models.includes(savedModel)) {
+            modelToSelect = savedModel
+            console.log('💾 Restored saved model preference:', savedModel)
+          }
+          
+          setSelectedModel(modelToSelect)
           console.log('🤖 Available models loaded:', data.models)
         }
       } else {
@@ -80,6 +115,342 @@ export default function VoiceRecorder() {
     } finally {
       setIsLoadingModels(false)
     }
+  }
+  
+  // Save model selection to localStorage when it changes
+  const handleModelChange = (model: string) => {
+    setSelectedModel(model)
+    localStorage.setItem('voice-bridge-selected-model', model)
+    console.log('💾 Saved model preference:', model)
+  }
+
+  // Process text input (pasted or typed text) with optional files
+  const processTextInput = async () => {
+    if (!textInput.trim() && uploadedFiles.length === 0) {
+      setError('Please enter some text or upload files to process')
+      return
+    }
+
+    try {
+      setIsLlmProcessing(true)
+      setError(null)
+      
+      const controller = new AbortController()
+      setAbortController(controller)
+      
+      console.log('🤖 Processing text input with LLM:', textInput)
+      console.log('📁 Including files:', uploadedFiles.map(f => f.name))
+      
+      // Create FormData for multimodal support
+      const formData = new FormData()
+      formData.append('text_input', textInput)
+      formData.append('selected_model', selectedModel)
+      
+      // Add all uploaded files
+      uploadedFiles.forEach((file, index) => {
+        formData.append(`file_${index}`, file)
+      })
+      
+      const response = await fetch('http://localhost:8001/api/v1/voice-chat', {
+        method: 'POST',
+        body: formData, // Use FormData instead of JSON for file upload
+        signal: controller.signal
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      // Get all the enhanced metadata from headers (same as voice processing)
+      const llmResponse = response.headers.get('X-LLM-Response')
+      const llmReasoning = response.headers.get('X-LLM-Reasoning')
+      const llmModel = response.headers.get('X-LLM-Model')
+      const llmTokens = parseInt(response.headers.get('X-LLM-Tokens') || '0')
+      const llmTime = parseFloat(response.headers.get('X-LLM-Processing-Time') || '0')
+      const ttsTime = parseFloat(response.headers.get('X-TTS-Processing-Time') || '0')
+      
+      // Get audio blob and play it
+      const responseAudioBlob = await response.blob()
+      
+      console.log('🔊 Playing TTS audio response...')
+      try {
+        const audioUrl = URL.createObjectURL(responseAudioBlob)
+        const audio = new Audio(audioUrl)
+        setCurrentAudio(audio)
+        
+        audio.onloadeddata = () => {
+          console.log('🎵 TTS audio loaded, playing...')
+          audio.play().catch(e => console.error('Audio play error:', e))
+        }
+        
+        audio.onended = () => {
+          console.log('🎵 TTS audio playback finished')
+          setCurrentAudio(null)
+          URL.revokeObjectURL(audioUrl)
+        }
+      } catch (audioError) {
+        console.error('🚨 Error processing TTS audio:', audioError)
+      }
+      
+      // Create result object for display
+      const result = {
+        transcript: textInput, // Use the input text as "transcript"
+        transcript_details: {
+          text: textInput,
+          language: 'text-input',
+          confidence: 1.0,
+          device: 'Text Input'
+        },
+        llm_response: llmResponse,
+        llm_reasoning: llmReasoning,
+        llm_details: {
+          model: llmModel,
+          tokens: llmTokens,
+          response: llmResponse,
+          reasoning: llmReasoning
+        },
+        processing_time: {
+          stt: 0, // No STT for text input
+          llm: llmTime,
+          tts: ttsTime
+        }
+      }
+      
+      setLlmResponse(result)
+      
+      // Set full reasoning data
+      if (llmReasoning && llmReasoning.trim()) {
+        setFullReasoningData(llmReasoning)
+      }
+      
+      // Add to conversation history
+      const newConversationEntry = {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        timestamp: new Date(),
+        userInput: textInput,
+        userInputDetails: {
+          language: 'text-input',
+          confidence: 1.0,
+          device: 'Text Input',
+          processingTime: 0
+        },
+        aiResponse: llmResponse || '',
+        aiReasoning: llmReasoning || '',
+        aiDetails: {
+          model: llmModel || selectedModel,
+          tokens: llmTokens,
+          processingTime: llmTime
+        },
+        ttsTime: ttsTime
+      }
+      
+      setConversationHistory(prev => {
+        const updated = [...prev, newConversationEntry]
+        const toSave = updated.slice(-50)
+        localStorage.setItem('voice-bridge-conversation-history', JSON.stringify(
+          toSave.map(entry => ({
+            ...entry,
+            timestamp: entry.timestamp.toISOString()
+          }))
+        ))
+        return updated
+      })
+      
+      // Clear the text input and uploaded files
+      setTextInput('')
+      setUploadedFiles([])
+      
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('🚫 Text processing request was canceled')
+        setError('Text processing was stopped')
+      } else {
+        setError('Failed to process text input. Make sure the backend and LM Studio are running.')
+        console.error('Text processing error:', error)
+      }
+    } finally {
+      setIsLlmProcessing(false)
+      setAbortController(null)
+    }
+  }
+
+  // Replay TTS for any given text
+  const replayTTS = async (text: string, buttonId?: string) => {
+    if (!text || !text.trim()) {
+      console.log('No text to replay')
+      return
+    }
+
+    try {
+      console.log('🔊 Replaying TTS for text:', text.substring(0, 50) + '...')
+      
+      // Disable the button temporarily
+      if (buttonId) {
+        const button = document.getElementById(buttonId) as HTMLButtonElement
+        if (button) {
+          button.disabled = true
+          button.textContent = '🔄 Playing...'
+        }
+      }
+      
+      const response = await fetch('http://localhost:8001/api/v1/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`TTS error! status: ${response.status}`)
+      }
+      
+      const audioBlob = await response.blob()
+      const audioUrl = URL.createObjectURL(audioBlob)
+      const audio = new Audio(audioUrl)
+      
+      audio.onloadeddata = () => {
+        audio.play().catch(e => console.error('TTS replay error:', e))
+      }
+      
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl)
+        // Re-enable button
+        if (buttonId) {
+          const button = document.getElementById(buttonId) as HTMLButtonElement
+          if (button) {
+            button.disabled = false
+            button.textContent = '🔊 Read Aloud'
+          }
+        }
+      }
+      
+      audio.onerror = () => {
+        console.error('Audio playback error')
+        // Re-enable button
+        if (buttonId) {
+          const button = document.getElementById(buttonId) as HTMLButtonElement
+          if (button) {
+            button.disabled = false
+            button.textContent = '🔊 Read Aloud'
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('🚨 TTS replay failed:', error)
+      // Re-enable button
+      if (buttonId) {
+        const button = document.getElementById(buttonId) as HTMLButtonElement
+        if (button) {
+          button.disabled = false
+          button.textContent = '🔊 Read Aloud'
+        }
+      }
+    }
+  }
+
+  // Handle paste functionality
+  const handlePaste = async () => {
+    try {
+      const clipboardText = await navigator.clipboard.readText()
+      setTextInput(clipboardText)
+      console.log('📋 Pasted text from clipboard:', clipboardText.substring(0, 50) + '...')
+    } catch (error) {
+      console.error('Failed to paste from clipboard:', error)
+      setError('Failed to paste from clipboard. You can manually paste using Ctrl+V in the text area.')
+    }
+  }
+
+  // File upload handling
+  const handleFileSelect = (files: FileList | null) => {
+    if (!files) return
+    
+    const newFiles = Array.from(files)
+    const validFiles: File[] = []
+    const maxSize = 50 * 1024 * 1024 // 50MB limit
+    
+    for (const file of newFiles) {
+      if (file.size > maxSize) {
+        setError(`File ${file.name} is too large. Maximum size is 50MB.`)
+        continue
+      }
+      
+      // Accept most common file types for multimodal processing
+      const allowedTypes = [
+        // Images
+        'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml',
+        // Documents
+        'application/pdf', 'text/plain', 'text/markdown', 'text/csv',
+        'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        // Audio
+        'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/webm', 'audio/mp4',
+        // Video
+        'video/mp4', 'video/webm', 'video/ogg', 'video/avi', 'video/mov', 'video/wmv',
+        // Code files
+        'text/javascript', 'text/typescript', 'text/html', 'text/css', 'application/json',
+        'text/x-python', 'text/x-java', 'text/x-c', 'text/x-cpp'
+      ]
+      
+      if (allowedTypes.includes(file.type) || file.type.startsWith('text/')) {
+        validFiles.push(file)
+      } else {
+        console.warn(`File type ${file.type} not explicitly supported, but will attempt to process:`, file.name)
+        validFiles.push(file) // Still allow - let the backend decide
+      }
+    }
+    
+    setUploadedFiles(prev => [...prev, ...validFiles])
+    console.log('📁 Added files:', validFiles.map(f => `${f.name} (${f.type})`).join(', '))
+  }
+
+  // Remove uploaded file
+  const removeFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // Drag and drop handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    handleFileSelect(e.dataTransfer.files)
+  }
+
+  // Get file icon based on type
+  const getFileIcon = (file: File) => {
+    const type = file.type.toLowerCase()
+    if (type.startsWith('image/')) return '🖼️'
+    if (type.startsWith('video/')) return '🎥'
+    if (type.startsWith('audio/')) return '🎵'
+    if (type === 'application/pdf') return '📄'
+    if (type.includes('word')) return '📄'
+    if (type.includes('excel') || type.includes('spreadsheet')) return '📈'
+    if (type.includes('powerpoint') || type.includes('presentation')) return '📉'
+    if (type.startsWith('text/')) return '📝'
+    return '📁'
+  }
+
+  // Format file size
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
   // Stop current audio and cancel any pending requests
@@ -108,9 +479,25 @@ export default function VoiceRecorder() {
     console.log('✅ Stop completed')
   }
 
-  // Load models when component mounts
+  // Load models and conversation history when component mounts
   useEffect(() => {
     fetchAvailableModels()
+    
+    // Load conversation history from localStorage
+    try {
+      const savedHistory = localStorage.getItem('voice-bridge-conversation-history')
+      if (savedHistory) {
+        const parsed = JSON.parse(savedHistory)
+        const restored = parsed.map((entry: any) => ({
+          ...entry,
+          timestamp: new Date(entry.timestamp) // Convert string back to Date
+        }))
+        setConversationHistory(restored)
+        console.log('📜 Restored conversation history:', restored.length, 'entries')
+      }
+    } catch (error) {
+      console.error('Error loading conversation history:', error)
+    }
   }, [])
 
   // Initialize audio context and get microphone permission
@@ -165,6 +552,8 @@ export default function VoiceRecorder() {
       setAudioBlob(null)
       setAudioUrl(null)
       setRecordingTime(0)
+      setRealtimeTranscription('') // Clear previous transcription
+      setLlmResponse(null) // Clear previous LLM response
       
       const stream = await initializeAudio()
       
@@ -439,9 +828,16 @@ export default function VoiceRecorder() {
       }
       
       const result = await response.json()
+      console.log('📄 STT Result:', result)
+      
+      // Set the transcription result
       setTranscription(result)
       
-      if (!result.text || result.text.trim() === '') {
+      // Also set real-time transcription for display
+      if (result.text && result.text.trim()) {
+        setRealtimeTranscription(result.text)
+        console.log('📄 Transcription completed:', result.text)
+      } else {
         setError('No speech detected in the recording. Try speaking louder or closer to the microphone.')
       }
       
@@ -587,6 +983,41 @@ export default function VoiceRecorder() {
         setFullReasoningData('')
       }
       
+      // Add this conversation to history
+      const newConversationEntry = {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        timestamp: new Date(),
+        userInput: transcript,
+        userInputDetails: {
+          language: transcriptLanguage,
+          confidence: transcriptConfidence,
+          device: transcriptDevice,
+          processingTime: sttTime
+        },
+        aiResponse: llmResponse,
+        aiReasoning: llmReasoning,
+        aiDetails: {
+          model: llmModel,
+          tokens: llmTokens,
+          processingTime: llmTime
+        },
+        ttsTime: ttsTime
+      }
+      
+      setConversationHistory(prev => {
+        const updated = [...prev, newConversationEntry]
+        // Save to localStorage (keep last 50 conversations)
+        const toSave = updated.slice(-50)
+        localStorage.setItem('voice-bridge-conversation-history', JSON.stringify(
+          toSave.map(entry => ({
+            ...entry,
+            timestamp: entry.timestamp.toISOString() // Convert Date to string for storage
+          }))
+        ))
+        console.log('📜 Added conversation to history. Total:', updated.length)
+        return updated
+      })
+      
       // Set the transcription with enhanced STT data
       if (result.transcript_details) {
         setTranscription({
@@ -670,14 +1101,15 @@ export default function VoiceRecorder() {
 
       {/* Model Selector */}
       <div className="mb-6">
-        <div className="max-w-md mx-auto">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            🤖 LM Studio Model
-          </label>
+        <div className="flex items-center justify-between max-w-4xl mx-auto">
+          <div className="flex-1 max-w-md">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              🤖 LM Studio Model
+            </label>
           <div className="relative">
             <select 
               value={selectedModel} 
-              onChange={(e) => setSelectedModel(e.target.value)}
+              onChange={(e) => handleModelChange(e.target.value)}
               disabled={isLoadingModels || isLlmProcessing}
               className="w-full px-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed appearance-none pr-10"
             >
@@ -708,11 +1140,214 @@ export default function VoiceRecorder() {
               </button>
             </div>
           )}
+          </div>
+          
+          {/* Conversation History Button */}
+          <div className="flex items-end">
+            <button
+              onClick={() => setShowConversationHistory(!showConversationHistory)}
+              className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
+            >
+              📜 History ({conversationHistory.length})
+            </button>
+          </div>
         </div>
+      </div>
+
+      {/* Text Input Section */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+            📝 Text Input Alternative
+          </h3>
+          <button
+            onClick={() => setShowTextInput(!showTextInput)}
+            className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg transition-colors"
+          >
+            {showTextInput ? 'Hide' : 'Show'} Text Input
+          </button>
+        </div>
+        
+        {showTextInput && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-4"
+          >
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  📋 Text Input:
+                </label>
+                <div className="relative">
+                  <textarea
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.ctrlKey && e.key === 'Enter') {
+                        e.preventDefault()
+                        processTextInput()
+                      }
+                    }}
+                    placeholder="Paste text here or type directly. Use Ctrl+Enter to process with AI."
+                    rows={4}
+                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900 dark:text-gray-100"
+                  />
+                  <div className="absolute top-2 right-2 flex gap-2">
+                    <button
+                      onClick={handlePaste}
+                      className="p-1 text-gray-500 hover:text-purple-600 transition-colors"
+                      title="Paste from clipboard"
+                    >
+                      📋
+                    </button>
+                    <button
+                      onClick={() => {
+                        setTextInput('')
+                        setUploadedFiles([])
+                      }}
+                      className="p-1 text-gray-500 hover:text-red-600 transition-colors"
+                      title="Clear all"
+                    >
+                      ✖️
+                    </button>
+                  </div>
+                </div>
+              </div>
+              
+              {/* File Upload Area */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  📁 Multimodal Files (Images, Documents, Audio, Video):
+                </label>
+                
+                {/* Drag and Drop Zone */}
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                    dragOver
+                      ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
+                      : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700'
+                  }`}
+                >
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(e) => handleFileSelect(e.target.files)}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    accept="image/*,video/*,audio/*,application/pdf,text/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                  />
+                  
+                  <div className="space-y-2">
+                    <div className="text-4xl">
+                      {dragOver ? '📂' : '📁'}
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-300">
+                      {dragOver ? (
+                        <span className="font-medium text-purple-600">Drop files here!</span>
+                      ) : (
+                        <>
+                          <span className="font-medium">Drag & drop files here</span> or <span className="text-purple-600 font-medium">click to browse</span>
+                          <br />
+                          <span className="text-xs text-gray-500">Supports images, documents, audio, video (max 50MB each)</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                
+                {/* File List */}
+                {uploadedFiles.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Uploaded Files ({uploadedFiles.length}):
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 max-h-32 overflow-y-auto">
+                      {uploadedFiles.map((file, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-2 bg-white dark:bg-gray-600 border border-gray-200 dark:border-gray-500 rounded-lg"
+                        >
+                          <div className="flex items-center gap-2 flex-1">
+                            <span className="text-lg">{getFileIcon(file)}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                                {file.name}
+                              </div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                {file.type || 'Unknown type'} • {formatFileSize(file.size)}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => removeFile(index)}
+                            className="p-1 text-red-500 hover:text-red-700 transition-colors"
+                            title="Remove file"
+                          >
+                            ✖️
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                {textInput.length} characters{uploadedFiles.length > 0 && ` • ${uploadedFiles.length} files`} • Multimodal AI input
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={processTextInput}
+                  disabled={(!textInput.trim() && uploadedFiles.length === 0) || isLlmProcessing}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                >
+                  {isLlmProcessing ? (
+                    <>
+                      <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      {uploadedFiles.length > 0 ? '📁🤖' : '🤖'} Process with AI
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
       </div>
 
       {/* Main Recording Interface */}
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-700/50 backdrop-blur-sm p-8">
+        
+        {/* Real-time Transcription Display */}
+        {(isRecording || realtimeTranscription) && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+              <span className="text-blue-700 dark:text-blue-300 text-sm font-medium">
+                {isRecording ? '🎤 Live Transcription:' : '📄 Last Transcription:'}
+              </span>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border">
+              <p className="text-gray-900 dark:text-gray-100 leading-relaxed">
+                {realtimeTranscription || 'Listening for speech...'}
+              </p>
+            </div>
+          </motion.div>
+        )}
         
         {/* Audio Visualizer */}
         <div className="flex justify-center items-end gap-2 h-32 mb-8 bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border-2 border-dashed border-gray-200 dark:border-gray-600">
@@ -1079,9 +1714,19 @@ export default function VoiceRecorder() {
                 </div>
                 
                 <div className="bg-white dark:bg-gray-800 p-5 rounded-lg border-2 border-purple-200 dark:border-purple-700 shadow-inner">
-                  <p className="text-gray-900 dark:text-gray-100 text-lg leading-relaxed whitespace-pre-wrap font-medium">
-                    {llmResponse.llm_response || 'No response generated'}
-                  </p>
+                  <div className="flex items-start justify-between gap-4">
+                    <p className="text-gray-900 dark:text-gray-100 text-lg leading-relaxed whitespace-pre-wrap font-medium flex-1">
+                      {llmResponse.llm_response || 'No response generated'}
+                    </p>
+                    <button
+                      id="current-response-replay"
+                      onClick={() => replayTTS(llmResponse.llm_response || '', 'current-response-replay')}
+                      className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors flex items-center gap-1 flex-shrink-0"
+                      title="Read this response aloud"
+                    >
+                      🔊 Read Aloud
+                    </button>
+                  </div>
                 </div>
                 
                 {/* Audio Playback Indicator */}
@@ -1253,6 +1898,213 @@ export default function VoiceRecorder() {
                 </div>
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* Conversation History Panel */}
+      <AnimatePresence>
+        {showConversationHistory && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="mt-8 bg-gray-900 rounded-xl border border-gray-800 p-6"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold text-yellow-300 flex items-center gap-3">
+                📜 Conversation History
+                <span className="text-lg font-normal text-gray-400">({conversationHistory.length} conversations)</span>
+              </h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const dataStr = JSON.stringify(conversationHistory, null, 2);
+                    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(dataBlob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `conversation-history-${new Date().toISOString().split('T')[0]}.json`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors flex items-center gap-1"
+                  disabled={conversationHistory.length === 0}
+                >
+                  💾 Export
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm('Are you sure you want to clear all conversation history? This cannot be undone.')) {
+                      setConversationHistory([]);
+                      localStorage.removeItem('conversationHistory');
+                    }
+                  }}
+                  className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors flex items-center gap-1"
+                  disabled={conversationHistory.length === 0}
+                >
+                  🗑️ Clear
+                </button>
+                <button
+                  onClick={() => setShowConversationHistory(false)}
+                  className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg transition-colors"
+                >
+                  ✕ Hide
+                </button>
+              </div>
+            </div>
+            
+            {conversationHistory.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="text-6xl mb-4">💬</div>
+                <p className="text-gray-400 text-lg">No conversations yet</p>
+                <p className="text-gray-500 text-sm mt-2">Start a voice chat to see your conversation history here!</p>
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-[70vh] overflow-y-auto">
+                {conversationHistory.slice().reverse().map((entry, index) => (
+                  <motion.div
+                    key={conversationHistory.length - index - 1}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.05 }}
+                    className="bg-gray-800 rounded-xl p-5 border border-gray-700 hover:border-gray-600 transition-colors"
+                  >
+                    {/* Conversation Header */}
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="text-2xl">💬</div>
+                        <div>
+                          <div className="text-white font-medium">
+                            Conversation #{conversationHistory.length - index}
+                          </div>
+                          <div className="text-gray-400 text-sm">
+                            {new Date(entry.timestamp).toLocaleDateString()} at {new Date(entry.timestamp).toLocaleTimeString()}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-gray-500 text-xs">
+                        ⏱️ {((entry.userInputDetails?.processingTime || 0) + (entry.aiDetails?.processingTime || 0) + (entry.ttsTime || 0)).toFixed(2)}s total
+                      </div>
+                    </div>
+                    
+                    {/* User Input Section */}
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="text-purple-400 font-medium flex items-center gap-1">
+                          🎤 You said:
+                        </div>
+                        {entry.userInputDetails && (
+                          <div className="flex gap-3 text-xs text-gray-500">
+                            <span>🎯 {Math.round((entry.userInputDetails.confidence || 0) * 100)}%</span>
+                            <span>🌍 {entry.userInputDetails.language}</span>
+                            <span>⏱️ {entry.userInputDetails.processingTime?.toFixed(2) || 'N/A'}s</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="bg-gray-700 rounded-lg p-3 border-l-4 border-purple-500">
+                        <p className="text-white text-sm leading-relaxed">
+                          "{entry.userInput}"
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {/* AI Response Section */}
+                    <div className="mb-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="text-green-400 font-medium flex items-center gap-1">
+                          🤖 Ava responded:
+                        </div>
+                        {entry.aiDetails && (
+                          <div className="flex gap-3 text-xs text-gray-500">
+                            <span>🧠 {entry.aiDetails.model}</span>
+                            <span>🔤 {entry.aiDetails.tokens} tokens</span>
+                            <span>⚡ {entry.aiDetails.processingTime?.toFixed(2) || 'N/A'}s</span>
+                            <span>🔊 {entry.ttsTime?.toFixed(2) || 'N/A'}s</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="bg-gray-700 rounded-lg p-3 border-l-4 border-green-500">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-white text-sm leading-relaxed flex-1">
+                            "{entry.aiResponse}"
+                          </p>
+                          <button
+                            id={`history-replay-${conversationHistory.length - index - 1}`}
+                            onClick={() => replayTTS(entry.aiResponse, `history-replay-${conversationHistory.length - index - 1}`)}
+                            className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors flex items-center gap-1 flex-shrink-0"
+                            title="Read this response aloud"
+                          >
+                            🔊
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Reasoning Section (Collapsible) */}
+                    {entry.aiReasoning && (
+                      <div className="border-t border-gray-600 pt-3">
+                        <button
+                          onClick={() => {
+                            const reasoningId = `reasoning-${conversationHistory.length - index - 1}`;
+                            const element = document.getElementById(reasoningId);
+                            if (element) {
+                              element.classList.toggle('hidden');
+                            }
+                          }}
+                          className="flex items-center gap-2 text-blue-400 hover:text-blue-300 text-sm font-medium transition-colors"
+                        >
+                          <span>🧠 View AI Reasoning</span>
+                          <span className="text-xs text-gray-500">({entry.aiReasoning.length} chars)</span>
+                        </button>
+                        <div id={`reasoning-${conversationHistory.length - index - 1}`} className="hidden mt-2">
+                          <div className="bg-gray-700 rounded-lg p-3 border-l-4 border-blue-500 max-h-32 overflow-y-auto">
+                            <pre className="text-gray-300 text-xs leading-relaxed whitespace-pre-wrap font-mono">
+                              {entry.aiReasoning}
+                            </pre>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                ))}
+              </div>
+            )}
+            
+            {/* History Stats */}
+            {conversationHistory.length > 0 && (
+              <div className="mt-6 pt-4 border-t border-gray-700">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                  <div className="bg-gray-800 rounded-lg p-3">
+                    <div className="text-yellow-400 text-lg font-bold">
+                      {conversationHistory.length}
+                    </div>
+                    <div className="text-gray-400 text-xs">Total Conversations</div>
+                  </div>
+                  <div className="bg-gray-800 rounded-lg p-3">
+                    <div className="text-green-400 text-lg font-bold">
+                      {conversationHistory.reduce((acc, entry) => acc + (entry.aiResponse?.length || 0), 0)}
+                    </div>
+                    <div className="text-gray-400 text-xs">AI Response Chars</div>
+                  </div>
+                  <div className="bg-gray-800 rounded-lg p-3">
+                    <div className="text-blue-400 text-lg font-bold">
+                      {conversationHistory.reduce((acc, entry) => acc + (entry.aiDetails?.tokens || 0), 0)}
+                    </div>
+                    <div className="text-gray-400 text-xs">Total Tokens</div>
+                  </div>
+                  <div className="bg-gray-800 rounded-lg p-3">
+                    <div className="text-purple-400 text-lg font-bold">
+                      {(conversationHistory.reduce((acc, entry) => {
+                        const total = (entry.userInputDetails?.processingTime || 0) + (entry.aiDetails?.processingTime || 0) + (entry.ttsTime || 0);
+                        return acc + total;
+                      }, 0)).toFixed(1)}s
+                    </div>
+                    <div className="text-gray-400 text-xs">Total Processing</div>
+                  </div>
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
