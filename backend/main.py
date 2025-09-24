@@ -472,8 +472,10 @@ async def voice_chat_pipeline(
             text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
             text = text.replace('\t', ' ')
             
-            # Remove control characters but keep printable ASCII
+            # Remove control characters but keep printable ASCII and common punctuation
             cleaned = ''.join(char if 32 <= ord(char) <= 126 else ' ' for char in text)
+            # Ensure apostrophes are preserved
+            cleaned = cleaned.replace("'", "'").replace("'", "'")
             
             # Clean up multiple spaces
             cleaned = ' '.join(cleaned.split())
@@ -491,24 +493,53 @@ async def voice_chat_pipeline(
         if llm_result.get("reasoning"):
             reasoning_safe = clean_for_header(llm_result["reasoning"], 300)
         
+        # Create comprehensive metadata for the response
+        response_metadata = {
+            "transcript": {
+                "text": stt_result["text"],
+                "language": stt_result.get("language", "unknown"),
+                "confidence": stt_result.get("confidence", 0),
+                "device_used": stt_result.get("device_used", "unknown"),
+                "processing_time": stt_result.get("processing_time", 0)
+            },
+            "llm_response": {
+                "text": llm_result["response"],
+                "reasoning": llm_result.get("reasoning", ""),  # Full reasoning, no truncation!
+                "model": llm_result.get("model", model),
+                "tokens": llm_result.get("usage", {}).get("total_tokens", 0),
+                "processing_time": llm_result.get("processing_time", 0),
+                "finish_reason": llm_result.get("finish_reason", "unknown")
+            },
+            "tts": {
+                "processing_time": await tts_service.get_last_processing_time(),
+                "voice": voice
+            },
+            "total_processing_time": (
+                stt_result.get("processing_time", 0) + 
+                llm_result.get("processing_time", 0) + 
+                await tts_service.get_last_processing_time()
+            )
+        }
+        
+        # Convert metadata to JSON string for header
+        import json
+        metadata_json = json.dumps(response_metadata, ensure_ascii=True)
+        
         return StreamingResponse(
             io.BytesIO(tts_audio),
             media_type="audio/wav",
             headers={
+                # Keep essential headers for backward compatibility
                 "X-Transcript": transcript_safe,
-                "X-Transcript-Language": stt_result.get("language", "unknown"),
-                "X-Transcript-Confidence": str(stt_result.get("confidence", 0)),
-                "X-Transcript-Device": stt_result.get("device_used", "unknown"),
                 "X-LLM-Response": llm_response_safe,
-                "X-LLM-Reasoning": reasoning_safe,
-                "X-LLM-Model": llm_result.get("model", model),
-                "X-LLM-Tokens": str(llm_result.get("usage", {}).get("total_tokens", 0)),
                 "X-STT-Time": str(stt_result.get("processing_time", 0)),
                 "X-LLM-Time": str(llm_result.get("processing_time", 0)),
                 "X-TTS-Time": str(await tts_service.get_last_processing_time()),
+                # NEW: Full metadata in JSON format
+                "X-Voice-Bridge-Data": metadata_json,
                 "Content-Disposition": "inline; filename=voice_response.wav",
                 # CORS headers to allow frontend to access our custom headers
-                "Access-Control-Expose-Headers": "X-Transcript,X-Transcript-Language,X-Transcript-Confidence,X-Transcript-Device,X-LLM-Response,X-LLM-Reasoning,X-LLM-Model,X-LLM-Tokens,X-STT-Time,X-LLM-Time,X-TTS-Time"
+                "Access-Control-Expose-Headers": "X-Transcript,X-LLM-Response,X-STT-Time,X-LLM-Time,X-TTS-Time,X-Voice-Bridge-Data"
             }
         )
         

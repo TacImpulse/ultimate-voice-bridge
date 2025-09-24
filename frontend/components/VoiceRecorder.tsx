@@ -40,6 +40,8 @@ export default function VoiceRecorder() {
   const [isLoadingModels, setIsLoadingModels] = useState(false)
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null)
   const [abortController, setAbortController] = useState<AbortController | null>(null)
+  const [showReasoningPanel, setShowReasoningPanel] = useState<boolean>(false)
+  const [fullReasoningData, setFullReasoningData] = useState<string>('')
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -482,18 +484,30 @@ export default function VoiceRecorder() {
         throw new Error(`Voice Chat API error: ${response.status}`)
       }
       
-      // Get metadata from headers
-      const transcript = response.headers.get('X-Transcript') || 'No transcript'
-      const transcriptLanguage = response.headers.get('X-Transcript-Language') || 'unknown'
-      const transcriptConfidence = parseFloat(response.headers.get('X-Transcript-Confidence') || '0')
-      const transcriptDevice = response.headers.get('X-Transcript-Device') || 'unknown'
-      const llmResponse = response.headers.get('X-LLM-Response') || 'No response'
-      const llmReasoning = response.headers.get('X-LLM-Reasoning') || ''
-      const llmModel = response.headers.get('X-LLM-Model') || selectedModel
-      const llmTokens = parseInt(response.headers.get('X-LLM-Tokens') || '0')
-      const sttTime = parseFloat(response.headers.get('X-STT-Time') || '0')
-      const llmTime = parseFloat(response.headers.get('X-LLM-Time') || '0')
-      const ttsTime = parseFloat(response.headers.get('X-TTS-Time') || '0')
+      // Get enhanced metadata from new JSON header
+      let enhancedData = null
+      try {
+        const voiceBridgeData = response.headers.get('X-Voice-Bridge-Data')
+        if (voiceBridgeData) {
+          enhancedData = JSON.parse(voiceBridgeData)
+          console.log('🎆 Enhanced Voice Bridge Data:', enhancedData)
+        }
+      } catch (error) {
+        console.error('Error parsing enhanced data:', error)
+      }
+      
+      // Use enhanced data if available, fall back to individual headers
+      const transcript = enhancedData?.transcript?.text || response.headers.get('X-Transcript') || 'No transcript'
+      const transcriptLanguage = enhancedData?.transcript?.language || 'unknown'
+      const transcriptConfidence = enhancedData?.transcript?.confidence || parseFloat(response.headers.get('X-Transcript-Confidence') || '0')
+      const transcriptDevice = enhancedData?.transcript?.device_used || 'unknown'
+      const llmResponse = enhancedData?.llm_response?.text || response.headers.get('X-LLM-Response') || 'No response'
+      const llmReasoning = enhancedData?.llm_response?.reasoning || '' // FULL reasoning now!
+      const llmModel = enhancedData?.llm_response?.model || selectedModel
+      const llmTokens = enhancedData?.llm_response?.tokens || parseInt(response.headers.get('X-LLM-Tokens') || '0')
+      const sttTime = enhancedData?.transcript?.processing_time || parseFloat(response.headers.get('X-STT-Time') || '0')
+      const llmTime = enhancedData?.llm_response?.processing_time || parseFloat(response.headers.get('X-LLM-Time') || '0')
+      const ttsTime = enhancedData?.tts?.processing_time || parseFloat(response.headers.get('X-TTS-Time') || '0')
       
       // Debug: Log ALL available headers
       console.log('🔍 ALL Response Headers:', Array.from(response.headers.entries()))
@@ -564,6 +578,14 @@ export default function VoiceRecorder() {
       
       console.log('🔍 Setting LLM Response with result:', result)
       setLlmResponse(result)
+      
+      // Set full reasoning data for the dedicated panel
+      if (llmReasoning && llmReasoning.trim()) {
+        setFullReasoningData(llmReasoning)
+        console.log('🤔 Full reasoning data available:', llmReasoning.length, 'characters')
+      } else {
+        setFullReasoningData('')
+      }
       
       // Set the transcription with enhanced STT data
       if (result.transcript_details) {
@@ -973,7 +995,7 @@ export default function VoiceRecorder() {
                 </div>
               </div>
 
-              {/* AI Thinking Process (if available) */}
+              {/* AI Thinking Process Summary (if available) */}
               {llmResponse.llm_reasoning && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
@@ -987,15 +1009,26 @@ export default function VoiceRecorder() {
                         🤔 AI Thinking Process
                       </h3>
                       <p className="text-yellow-600/80 dark:text-yellow-400/80 text-sm">
-                        How the AI reasoned through your question
+                        How the AI reasoned through your question (preview)
                       </p>
                     </div>
+                    <button
+                      onClick={() => setShowReasoningPanel(true)}
+                      className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                      🔍 View Full Reasoning
+                    </button>
                   </div>
                   
                   <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border">
                     <p className="text-gray-900 dark:text-gray-100 leading-relaxed whitespace-pre-wrap text-sm">
-                      {llmResponse.llm_reasoning}
+                      {llmResponse.llm_reasoning.slice(0, 300)}{llmResponse.llm_reasoning.length > 300 ? '...' : ''}
                     </p>
+                    {llmResponse.llm_reasoning.length > 300 && (
+                      <p className="text-yellow-600 text-xs mt-2">
+                        ✨ {llmResponse.llm_reasoning.length} characters of reasoning available - click "View Full Reasoning" above
+                      </p>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -1100,6 +1133,93 @@ export default function VoiceRecorder() {
           )}
         </AnimatePresence>
       </div>
+      
+      {/* Full Reasoning Panel Modal */}
+      <AnimatePresence>
+        {showReasoningPanel && fullReasoningData && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowReasoningPanel(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-3">
+                  <ArrowPathIcon className="h-8 w-8 text-yellow-600" />
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                      🤔 AI Reasoning Process
+                    </h2>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      Complete thought process from {llmResponse?.llm_details?.model || 'AI Model'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowReasoningPanel(false)}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <svg className="h-6 w-6 text-gray-600 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              {/* Modal Content */}
+              <div className="p-6 overflow-y-auto max-h-[60vh]">
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 p-6 rounded-xl border border-yellow-200 dark:border-yellow-800">
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="text-yellow-600 text-sm font-medium">
+                      📊 {fullReasoningData.length} characters of reasoning
+                    </span>
+                    <span className="text-yellow-600/60 text-xs">
+                      • {Math.ceil(fullReasoningData.length / 100)} lines approx
+                    </span>
+                  </div>
+                  <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border max-h-96 overflow-y-auto">
+                    <pre className="text-gray-900 dark:text-gray-100 leading-relaxed whitespace-pre-wrap text-sm font-mono">
+                      {fullReasoningData}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Modal Footer */}
+              <div className="flex justify-between items-center p-6 border-t border-gray-200 dark:border-gray-700">
+                <div className="text-sm text-gray-600 dark:text-gray-400">
+                  ✨ This shows the complete AI reasoning process for transparency
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(fullReasoningData)
+                      // Could add a toast notification here
+                    }}
+                    className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    📋 Copy Reasoning
+                  </button>
+                  <button
+                    onClick={() => setShowReasoningPanel(false)}
+                    className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
