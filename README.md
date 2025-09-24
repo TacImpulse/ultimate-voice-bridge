@@ -12,6 +12,14 @@ A professional-grade, full-stack voice processing application that bridges Speec
 
 ## 🚀 Features
 
+### 🆕 Latest Features (v2.0)
+- **🤖 Dynamic Model Selector**: Switch between 17+ LM Studio models on-the-fly
+- **🛑 Smart Stop Button**: Cancel audio playback and requests instantly
+- **🎤 Enhanced Transcription**: See exactly what you said with confidence scores
+- **🤔 AI Reasoning Display**: Watch the AI think through your questions step-by-step
+- **📊 Conversation Flow UI**: Beautiful User Speech → AI Thinking → AI Response layout
+- **🖥️ One-Click Desktop Launchers**: Start everything with a single desktop shortcut
+
 ### Core Capabilities
 - **🎯 Real-time Speech Processing**: Ultra-low latency STT with Whisper integration
 - **🤖 LLM Integration**: Support for OpenAI, Anthropic, and local LM Studio models
@@ -59,7 +67,18 @@ A professional-grade, full-stack voice processing application that bridges Speec
 | **Deployment** | Docker + Nginx | Containerized production setup |
 | **CI/CD** | GitHub Actions | Automated testing & deployment |
 
-## 🚦 Quick Start
+## 😦 Quick Start
+
+### 🖥️ Super Quick Start (Windows)
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/TacImpulse/ultimate-voice-bridge.git
+   cd ultimate-voice-bridge
+   ```
+2. **Create Desktop Shortcut**
+   - Right-click on `launch_voice_bridge.bat`
+   - Select "Send to" → "Desktop (create shortcut)"
+3. **Double-click your shortcut** – Everything starts automatically! 🎆
 
 ### Prerequisites
 - **Node.js 18+** and npm 9+
@@ -132,20 +151,29 @@ docker-compose -f docker-compose.prod.yml up
 
 ## 📱 Usage
 
-### 🎤 Voice Recording Interface
-1. Open http://localhost:3001/voice
-2. Grant microphone permissions when prompted
-3. Click the red microphone button to start recording
-4. Speak clearly into your microphone
-5. Click stop when finished
-6. Click the document icon to transcribe with RTX 5090 GPU acceleration
-7. View real-time transcription results with technical details
+### 🎤 Enhanced Voice Chat Interface
+1. **Launch**: Double-click your desktop shortcut or go to http://localhost:3000/voice
+2. **Select Model**: Choose from 17+ available LM Studio models in the dropdown
+3. **Record**: Click the red microphone button and speak clearly
+4. **Process**: Click the purple model button to start the full AI pipeline
+5. **Experience**: Watch the conversation flow:
+   - 🎤 **Your Speech**: See transcription with confidence and language detection
+   - 🤔 **AI Thinking**: Watch reasoning models show their thought process
+   - 🎧 **AI Response**: Hear Ava speak with automatic audio playback
+6. **Control**: Use the stop button to cancel audio or requests anytime
 
-**Features:**
+**🆕 New Features:**
+- **Smart Model Switching**: 17+ models including uncensored options
+- **Stop Control**: Instantly stop chatty AI responses
+- **Enhanced Transcription**: Language, confidence, device, and timing details
+- **AI Reasoning**: See how reasoning models think through problems
+- **Performance Stats**: Real-time STT/LLM/TTS processing times
+- **Desktop Shortcuts**: One-click launching with automatic browser opening
+
+**Classic Features:**
 - Real-time audio visualization with 20-band frequency display
 - Recording timer and audio playback
 - GPU-accelerated Whisper transcription (typically <1 second)
-- Language auto-detection with confidence scores
 - Voice activity detection and silence trimming
 - Professional UI with smooth animations
 
