@@ -324,26 +324,161 @@ async def voice_to_llm_pipeline(
 
 @app.post("/api/v1/voice-chat")
 async def voice_chat_pipeline(
-    audio: UploadFile = File(..., description="Audio file with user's voice message"),
+    # Optional audio file for voice input
+    audio: UploadFile = File(None, description="Audio file with user's voice message (optional)"),
+    # Optional text input for direct text processing
+    text_input: str = Form(None, description="Direct text input (alternative to audio)"),
+    # Optional selected model parameter
+    selected_model: str = Form("default", description="LLM model to use"),
+    # TTS voice settings
     voice: str = Form("default", description="TTS voice to use for response"),
-    model: str = Form("default", description="LLM model to use"),
-    language: str = Form("auto", description="STT language")
+    model: str = Form("default", description="LLM model to use (legacy support)"),
+    language: str = Form("auto", description="STT language"),
+    # Primary file selection and metadata
+    primary_file_index: int = Form(None, description="Index of primary file for analysis"),
+    total_files: int = Form(0, description="Total number of files uploaded"),
+    # Multimodal file support
+    file_0: UploadFile = File(None, description="Additional file 0"),
+    file_1: UploadFile = File(None, description="Additional file 1"),
+    file_2: UploadFile = File(None, description="Additional file 2"),
+    file_3: UploadFile = File(None, description="Additional file 3"),
+    file_4: UploadFile = File(None, description="Additional file 4"),
+    # File metadata
+    file_0_name: str = Form(None, description="Name of file 0"),
+    file_0_type: str = Form(None, description="MIME type of file 0"),
+    file_0_is_primary: bool = Form(False, description="Whether file 0 is primary"),
+    file_1_name: str = Form(None, description="Name of file 1"),
+    file_1_type: str = Form(None, description="MIME type of file 1"),
+    file_1_is_primary: bool = Form(False, description="Whether file 1 is primary"),
+    file_2_name: str = Form(None, description="Name of file 2"),
+    file_2_type: str = Form(None, description="MIME type of file 2"),
+    file_2_is_primary: bool = Form(False, description="Whether file 2 is primary"),
+    file_3_name: str = Form(None, description="Name of file 3"),
+    file_3_type: str = Form(None, description="MIME type of file 3"),
+    file_3_is_primary: bool = Form(False, description="Whether file 3 is primary"),
+    file_4_name: str = Form(None, description="Name of file 4"),
+    file_4_type: str = Form(None, description="MIME type of file 4"),
+    file_4_is_primary: bool = Form(False, description="Whether file 4 is primary")
 ):
-    """Complete voice chat pipeline: STT -> LLM -> TTS"""
+    """Complete multimodal chat pipeline: (STT + Files + Text) -> LLM -> TTS"""
     try:
-        logger.info("🎤 Starting Voice Chat pipeline (STT + LLM + TTS)")
+        logger.info("🎤 Starting Multimodal Voice Chat pipeline")
         
-        # Step 1: Speech to Text
-        audio_data = await audio.read()
-        stt_result = await stt_service.transcribe(audio_data, language=language)
+        # Determine the actual model to use (prioritize selected_model)
+        actual_model = selected_model if selected_model != "default" else model
+        logger.info(f"🤖 Using model: {actual_model}")
         
-        if not stt_result.get("text"):
-            raise HTTPException(status_code=400, detail="No speech detected in audio")
+        user_content = ""
+        stt_result = None
         
-        logger.info(f"📝 Voice Chat STT result: '{stt_result['text']}'")
+        # Step 1: Process input (either audio or text)
+        if audio and audio.filename:
+            # Voice input - use STT
+            logger.info("🎤 Processing audio input with STT")
+            audio_data = await audio.read()
+            stt_result = await stt_service.transcribe(audio_data, language=language)
+            
+            if not stt_result.get("text"):
+                raise HTTPException(status_code=400, detail="No speech detected in audio")
+            
+            user_content = stt_result["text"]
+            logger.info(f"📝 Voice Chat STT result: '{user_content}'")
+            
+        elif text_input and text_input.strip():
+            # Text input - use directly
+            logger.info("📝 Processing text input directly")
+            user_content = text_input.strip()
+            logger.info(f"📝 Text input: '{user_content}'")
+            
+            # Create a mock STT result for consistency
+            stt_result = {
+                "text": user_content,
+                "language": "text-input",
+                "confidence": 1.0,
+                "processing_time": 0,
+                "device_used": "Text Input"
+            }
+        else:
+            # Check if we have any files - allow file-only submissions
+            has_files = any(f and f.filename for f in [file_0, file_1, file_2, file_3, file_4])
+            if not has_files:
+                raise HTTPException(status_code=400, detail="Either audio file, text_input, or uploaded files must be provided")
+            
+            # File-only submission - use a generic prompt
+            logger.info("📁 Processing file-only submission")
+            user_content = "Please analyze the uploaded files."
+            
+            # Create a mock STT result for consistency
+            stt_result = {
+                "text": user_content,
+                "language": "file-input",
+                "confidence": 1.0,
+                "processing_time": 0,
+                "device_used": "File Upload"
+            }
+        
+        # Step 1.5: Process any additional files with primary file awareness
+        uploaded_files = []
+        file_descriptions = []
+        primary_file_description = None
+        used_files = []
+        
+        # Create mapping of metadata
+        file_metadata = [
+            (file_0, file_0_name, file_0_type, file_0_is_primary),
+            (file_1, file_1_name, file_1_type, file_1_is_primary),
+            (file_2, file_2_name, file_2_type, file_2_is_primary),
+            (file_3, file_3_name, file_3_type, file_3_is_primary),
+            (file_4, file_4_name, file_4_type, file_4_is_primary)
+        ]
+        
+        for i, (file_param, file_name, file_type, is_primary) in enumerate(file_metadata):
+            if file_param and file_param.filename:
+                # Use provided metadata if available, otherwise fallback to file attributes
+                actual_name = file_name or file_param.filename
+                actual_type = file_type or file_param.content_type
+                
+                logger.info(f"📁 Processing file {i}: {actual_name} ({actual_type}) {'[PRIMARY]' if is_primary else ''}")
+                
+                # Read file content
+                file_content = await file_param.read()
+                uploaded_files.append(file_content)
+                used_files.append({
+                    "index": i,
+                    "name": actual_name,
+                    "type": actual_type,
+                    "is_primary": is_primary
+                })
+                
+                # Create description for LLM based on file type
+                if actual_type and actual_type.startswith('image/'):
+                    description = f"[{'PRIMARY ' if is_primary else ''}Image: {actual_name}]"
+                elif actual_type == 'application/pdf':
+                    description = f"[{'PRIMARY ' if is_primary else ''}PDF: {actual_name}]"
+                elif actual_type and actual_type.startswith('text/'):
+                    try:
+                        text_content = file_content.decode('utf-8')[:500]  # Limit for context
+                        description = f"[{'PRIMARY ' if is_primary else ''}Text file '{actual_name}': {text_content}...]"
+                    except:
+                        description = f"[{'PRIMARY ' if is_primary else ''}Text file: {actual_name}]"
+                else:
+                    description = f"[{'PRIMARY ' if is_primary else ''}File: {actual_name} ({actual_type})]"
+                
+                if is_primary:
+                    primary_file_description = description
+                    logger.info(f"🎯 Primary file identified: {actual_name}")
+                
+                file_descriptions.append(description)
+        
+        # Combine user content with file descriptions
+        if file_descriptions:
+            combined_content = user_content + "\n\nAttached files:\n" + "\n".join(file_descriptions)
+            logger.info(f"📁 Combined content with {len(file_descriptions)} files")
+        else:
+            combined_content = user_content
         
         # Step 2: Generate LLM response
-        logger.info(f"🤖 Generating LLM response with model: {model}")
+        logger.info(f"🤖 Generating LLM response with model: {actual_model}")
         
         # Clear any conversation history that might contain XML examples
         llm_service.clear_conversation_history()
@@ -352,7 +487,7 @@ async def voice_chat_pipeline(
         messages = [
             {
                 "role": "system", 
-                "content": "You are Ava, a friendly AI assistant. Respond ONLY with natural conversational speech. NEVER include XML, code, technical terms, or structured data. Here are examples:\n\nUser: Hello\nAva: Hi there! How are you doing today?\n\nUser: How's the weather?\nAva: I'm not sure about the weather in your area, but I hope it's nice!\n\nIMPORTANT: Respond with ONLY natural speech like the examples above. No XML, no technical content, no structured data."
+                "content": "You are Ava, a friendly AI assistant. You can analyze text, describe images, and work with various file types. Respond with natural conversational speech. If files are mentioned, acknowledge them and provide helpful responses about their content."
             },
             {
                 "role": "user",
@@ -364,13 +499,13 @@ async def voice_chat_pipeline(
             },
             {
                 "role": "user", 
-                "content": stt_result["text"]
+                "content": combined_content  # Use the combined content with files
             }
         ]
         
         llm_result = await llm_service.generate_response(
             messages=messages, 
-            model=model,
+            model=actual_model,  # Use the actual model (prioritized selected_model)
             include_reasoning=True,  # Enable reasoning for models that support it
             use_conversation_history=False  # We're managing history manually
         )
@@ -512,14 +647,19 @@ async def voice_chat_pipeline(
                 # Keep essential headers for backward compatibility
                 "X-Transcript": transcript_safe,
                 "X-LLM-Response": llm_response_safe,
-                "X-STT-Time": str(stt_result.get("processing_time", 0)),
-                "X-LLM-Time": str(llm_result.get("processing_time", 0)),
-                "X-TTS-Time": str(await tts_service.get_last_processing_time()),
+                "X-LLM-Reasoning": reasoning_safe,
+                "X-LLM-Model": str(llm_result.get("model", actual_model)),
+                "X-LLM-Tokens": str(llm_result.get("usage", {}).get("total_tokens", 0)),
+                "X-LLM-Processing-Time": str(llm_result.get("processing_time", 0)),
+                "X-TTS-Processing-Time": str(await tts_service.get_last_processing_time()),
+                "X-Used-Files": json.dumps([f["name"] for f in used_files]) if used_files else "",
+                "X-Primary-File": primary_file_description or "",
+                "X-File-Count": str(len(used_files)),
                 # NEW: Full metadata in JSON format
                 "X-Voice-Bridge-Data": metadata_json,
                 "Content-Disposition": "inline; filename=voice_response.wav",
                 # CORS headers to allow frontend to access our custom headers
-                "Access-Control-Expose-Headers": "X-Transcript,X-LLM-Response,X-STT-Time,X-LLM-Time,X-TTS-Time,X-Voice-Bridge-Data"
+                "Access-Control-Expose-Headers": "X-Transcript,X-LLM-Response,X-LLM-Reasoning,X-LLM-Model,X-LLM-Tokens,X-LLM-Processing-Time,X-TTS-Processing-Time,X-Used-Files,X-Primary-File,X-File-Count,X-Voice-Bridge-Data"
             }
         )
         

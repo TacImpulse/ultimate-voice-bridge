@@ -66,7 +66,19 @@ export default function VoiceRecorder() {
   const [showTextInput, setShowTextInput] = useState<boolean>(false)
   const [realtimeTranscription, setRealtimeTranscription] = useState<string>('')
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
+  const [primaryFileIndex, setPrimaryFileIndex] = useState<number | null>(null)
   const [dragOver, setDragOver] = useState<boolean>(false)
+  const [isTextInputRecording, setIsTextInputRecording] = useState<boolean>(false)
+  const [textInputRecorder, setTextInputRecorder] = useState<MediaRecorder | null>(null)
+  const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false)
+  const [audioProgress, setAudioProgress] = useState<number>(0)
+  const [audioDuration, setAudioDuration] = useState<number>(0)
+  const [audioVolume, setAudioVolume] = useState<number>(1.0)
+  const [audioSpeed, setAudioSpeed] = useState<number>(1.0)
+  const [isSeekingAudio, setIsSeekingAudio] = useState<boolean>(false)
+  const [processingStatus, setProcessingStatus] = useState<string>('')
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('disconnected')
+  const [lastProcessedFiles, setLastProcessedFiles] = useState<string[]>([])
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -125,7 +137,9 @@ export default function VoiceRecorder() {
   }
 
   // Process text input (pasted or typed text) with optional files
-  const processTextInput = async () => {
+  const processTextInput = async (retryCount = 0) => {
+    const maxRetries = 2
+    
     if (!textInput.trim() && uploadedFiles.length === 0) {
       setError('Please enter some text or upload files to process')
       return
@@ -134,22 +148,39 @@ export default function VoiceRecorder() {
     try {
       setIsLlmProcessing(true)
       setError(null)
+      setConnectionStatus('connecting')
+      setProcessingStatus('Preparing request...')
       
       const controller = new AbortController()
       setAbortController(controller)
       
       console.log('🤖 Processing text input with LLM:', textInput)
       console.log('📁 Including files:', uploadedFiles.map(f => f.name))
+      console.log('🎯 Primary file index:', primaryFileIndex)
       
       // Create FormData for multimodal support
       const formData = new FormData()
       formData.append('text_input', textInput)
       formData.append('selected_model', selectedModel)
       
-      // Add all uploaded files
+      // Add primary file index if specified
+      if (primaryFileIndex !== null) {
+        formData.append('primary_file_index', primaryFileIndex.toString())
+      }
+      
+      // Add all uploaded files with metadata
       uploadedFiles.forEach((file, index) => {
         formData.append(`file_${index}`, file)
+        formData.append(`file_${index}_name`, file.name)
+        formData.append(`file_${index}_type`, file.type)
+        formData.append(`file_${index}_is_primary`, (index === primaryFileIndex).toString())
       })
+      
+      // Add total file count
+      formData.append('total_files', uploadedFiles.length.toString())
+      
+      setProcessingStatus(`Sending request with ${uploadedFiles.length} files...`)
+      setConnectionStatus('connecting')
       
       const response = await fetch('http://localhost:8001/api/v1/voice-chat', {
         method: 'POST',
@@ -168,6 +199,14 @@ export default function VoiceRecorder() {
       const llmTokens = parseInt(response.headers.get('X-LLM-Tokens') || '0')
       const llmTime = parseFloat(response.headers.get('X-LLM-Processing-Time') || '0')
       const ttsTime = parseFloat(response.headers.get('X-TTS-Processing-Time') || '0')
+      const usedFiles = response.headers.get('X-Used-Files') ? JSON.parse(response.headers.get('X-Used-Files') || '[]') : []
+      const primaryFile = response.headers.get('X-Primary-File') || ''
+      const fileCount = parseInt(response.headers.get('X-File-Count') || '0')
+      
+      console.log('📁 Files processed:', { usedFiles, primaryFile, fileCount })
+      setLastProcessedFiles(usedFiles)
+      setConnectionStatus('connected')
+      setProcessingStatus(`Successfully processed ${fileCount} files. Playing response...`)
       
       // Get audio blob and play it
       const responseAudioBlob = await response.blob()
@@ -180,12 +219,31 @@ export default function VoiceRecorder() {
         
         audio.onloadeddata = () => {
           console.log('🎵 TTS audio loaded, playing...')
+          setAudioDuration(audio.duration || 0)
+          setIsAudioPlaying(true)
+          audio.volume = audioVolume
+          audio.playbackRate = audioSpeed
           audio.play().catch(e => console.error('Audio play error:', e))
+        }
+        
+        audio.onplay = () => {
+          setIsAudioPlaying(true)
+        }
+        
+        audio.onpause = () => {
+          setIsAudioPlaying(false)
+        }
+        
+        audio.ontimeupdate = () => {
+          setAudioProgress(audio.currentTime || 0)
         }
         
         audio.onended = () => {
           console.log('🎵 TTS audio playback finished')
           setCurrentAudio(null)
+          setIsAudioPlaying(false)
+          setAudioProgress(0)
+          setAudioDuration(0)
           URL.revokeObjectURL(audioUrl)
         }
       } catch (audioError) {
@@ -259,18 +317,43 @@ export default function VoiceRecorder() {
       // Clear the text input and uploaded files
       setTextInput('')
       setUploadedFiles([])
+      setPrimaryFileIndex(null)
       
     } catch (error: any) {
       if (error.name === 'AbortError') {
-        console.log('🚫 Text processing request was canceled')
+        console.log('🙫 Text processing request was canceled')
         setError('Text processing was stopped')
       } else {
-        setError('Failed to process text input. Make sure the backend and LM Studio are running.')
-        console.error('Text processing error:', error)
+        // Categorize errors for better user experience
+        let errorMessage = 'Failed to process text input.'
+        
+        if (error.message?.includes('NetworkError') || error.message?.includes('fetch')) {
+          errorMessage = 'Network error. Please check your connection and try again.'
+          
+          // Retry on network errors
+          if (retryCount < maxRetries) {
+            console.log(`🔄 Retrying request (${retryCount + 1}/${maxRetries})...`)
+            setTimeout(() => processTextInput(retryCount + 1), 1000 * (retryCount + 1))
+            return
+          } else {
+            errorMessage += ' Retries exhausted.'
+          }
+        } else if (error.message?.includes('422')) {
+          errorMessage = 'Invalid input format. Please check your files and text.'
+        } else if (error.message?.includes('500')) {
+          errorMessage = 'Server error. The backend service may be unavailable.'
+        } else if (error.message?.includes('404')) {
+          errorMessage = 'Service endpoint not found. Please check the backend configuration.'
+        }
+        
+        setError(errorMessage)
+        console.error('Text processing error:', { error, retryCount, maxRetries })
       }
     } finally {
       setIsLlmProcessing(false)
       setAbortController(null)
+      setProcessingStatus('')
+      setConnectionStatus('disconnected')
     }
   }
 
@@ -352,6 +435,84 @@ export default function VoiceRecorder() {
     }
   }
 
+  // Speech-to-text for text input field
+  const startTextInputRecording = async () => {
+    try {
+      setError(null)
+      setIsTextInputRecording(true)
+      
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      const chunks: Blob[] = []
+      
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data)
+        }
+      }
+      
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/wav' })
+        await processTextInputSpeech(audioBlob)
+        
+        // Stop the stream
+        stream.getTracks().forEach(track => track.stop())
+        setTextInputRecorder(null)
+        setIsTextInputRecording(false)
+      }
+      
+      recorder.start()
+      setTextInputRecorder(recorder)
+      console.log('🎤 Started text input speech recording')
+      
+    } catch (error) {
+      console.error('Error starting text input recording:', error)
+      setError('Failed to start recording. Please check microphone permissions.')
+      setIsTextInputRecording(false)
+    }
+  }
+  
+  const stopTextInputRecording = () => {
+    if (textInputRecorder && textInputRecorder.state === 'recording') {
+      textInputRecorder.stop()
+      console.log('🛑 Stopped text input speech recording')
+    }
+  }
+  
+  const processTextInputSpeech = async (audioBlob: Blob) => {
+    try {
+      setIsProcessing(true)
+      console.log('🎯 Processing text input speech with Whisper...', audioBlob.size, 'bytes')
+      
+      const formData = new FormData()
+      formData.append('file', audioBlob, 'text_input_recording.wav')
+      
+      const response = await fetch('http://localhost:8001/api/v1/transcribe', {
+        method: 'POST',
+        body: formData
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      console.log('✅ Text input speech transcribed:', result.text)
+      
+      // Append the transcribed text to the existing text input
+      if (result.text && result.text.trim()) {
+        const newText = textInput ? textInput + ' ' + result.text.trim() : result.text.trim()
+        setTextInput(newText)
+      }
+      
+    } catch (error) {
+      console.error('Error processing text input speech:', error)
+      setError('Failed to transcribe speech. Please try again.')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
   // Handle paste functionality
   const handlePaste = async () => {
     try {
@@ -404,13 +565,82 @@ export default function VoiceRecorder() {
       }
     }
     
-    setUploadedFiles(prev => [...prev, ...validFiles])
+    setUploadedFiles(prev => {
+      const combined = [...prev, ...validFiles]
+      // If no primary is set yet, default to the first file
+      if (combined.length > 0 && primaryFileIndex === null) {
+        setPrimaryFileIndex(0)
+      }
+      return combined
+    })
     console.log('📁 Added files:', validFiles.map(f => `${f.name} (${f.type})`).join(', '))
   }
 
   // Remove uploaded file
   const removeFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index))
+    setUploadedFiles(prev => {
+      const newFiles = prev.filter((_, i) => i !== index)
+      // Adjust primary file index if needed
+      if (primaryFileIndex === index) {
+        setPrimaryFileIndex(null) // Reset primary if it was the removed file
+      } else if (primaryFileIndex !== null && primaryFileIndex > index) {
+        setPrimaryFileIndex(primaryFileIndex - 1) // Shift down if primary was after removed file
+      }
+      return newFiles
+    })
+  }
+  
+  // Set primary file
+  const setPrimaryFile = (index: number) => {
+    setPrimaryFileIndex(index)
+  }
+  
+  // Move file up/down in the list
+  const moveFile = (fromIndex: number, toIndex: number) => {
+    if (toIndex < 0 || toIndex >= uploadedFiles.length) return
+    
+    setUploadedFiles(prev => {
+      const newFiles = [...prev]
+      const [movedFile] = newFiles.splice(fromIndex, 1)
+      newFiles.splice(toIndex, 0, movedFile)
+      
+      // Update primary file index if needed
+      if (primaryFileIndex === fromIndex) {
+        setPrimaryFileIndex(toIndex)
+      } else if (primaryFileIndex !== null) {
+        if (fromIndex < primaryFileIndex && toIndex >= primaryFileIndex) {
+          setPrimaryFileIndex(primaryFileIndex - 1)
+        } else if (fromIndex > primaryFileIndex && toIndex <= primaryFileIndex) {
+          setPrimaryFileIndex(primaryFileIndex + 1)
+        }
+      }
+      
+      return newFiles
+    })
+  }
+  
+  // Process single file with specific prompt
+  const processSingleFile = async (fileIndex: number, customPrompt?: string) => {
+    if (fileIndex >= uploadedFiles.length) return
+    
+    const originalPrimary = primaryFileIndex
+    const originalText = textInput
+    
+    try {
+      // Temporarily set this file as primary
+      setPrimaryFileIndex(fileIndex)
+      if (customPrompt) {
+        setTextInput(customPrompt)
+      }
+      
+      // Process with just this context
+      await processTextInput()
+      
+    } finally {
+      // Restore original state
+      setPrimaryFileIndex(originalPrimary)
+      setTextInput(originalText)
+    }
   }
 
   // Drag and drop handlers
@@ -452,6 +682,14 @@ export default function VoiceRecorder() {
     const i = Math.floor(Math.log(bytes) / Math.log(k))
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
+  
+  // Generate thumbnail URL for image files
+  const generateThumbnail = (file: File): string | null => {
+    if (file.type.startsWith('image/')) {
+      return URL.createObjectURL(file)
+    }
+    return null
+  }
 
   // Stop current audio and cancel any pending requests
   const stopAudioAndRequests = () => {
@@ -462,6 +700,9 @@ export default function VoiceRecorder() {
       currentAudio.pause()
       currentAudio.currentTime = 0
       setCurrentAudio(null)
+      setIsAudioPlaying(false)
+      setAudioProgress(0)
+      setAudioDuration(0)
       console.log('🔇 Audio playback stopped')
     }
     
@@ -478,10 +719,113 @@ export default function VoiceRecorder() {
     
     console.log('✅ Stop completed')
   }
+  
+  // Play/Pause audio control
+  const toggleAudioPlayback = () => {
+    if (currentAudio) {
+      if (isAudioPlaying) {
+        currentAudio.pause()
+      } else {
+        currentAudio.play().catch(e => console.error('Audio play error:', e))
+      }
+    }
+  }
+  
+  // Seek audio to specific time
+  const seekAudio = (time: number) => {
+    if (currentAudio) {
+      currentAudio.currentTime = time
+      setAudioProgress(time)
+    }
+  }
+  
+  // Skip forward/backward
+  const skipAudio = (seconds: number) => {
+    if (currentAudio) {
+      const newTime = Math.max(0, Math.min(currentAudio.duration, currentAudio.currentTime + seconds))
+      currentAudio.currentTime = newTime
+    }
+  }
+  
+  // Set audio playback speed
+  const changeAudioSpeed = (speed: number) => {
+    setAudioSpeed(speed)
+    if (currentAudio) {
+      currentAudio.playbackRate = speed
+    }
+  }
+  
+  // Set audio volume
+  const changeAudioVolume = (volume: number) => {
+    setAudioVolume(volume)
+    if (currentAudio) {
+      currentAudio.volume = volume
+    }
+  }
+  
+  // Format time for display
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
 
+  // Keyboard shortcuts handler
+  const handleKeyDown = (e: KeyboardEvent) => {
+    // Don't trigger shortcuts when user is typing in an input field
+    const target = e.target as HTMLElement
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true') {
+      return
+    }
+    
+    switch (e.code) {
+      case 'Space':
+        e.preventDefault()
+        if (currentAudio) {
+          toggleAudioPlayback()
+        }
+        break
+      case 'Escape':
+        e.preventDefault()
+        stopAudioAndRequests()
+        break
+      case 'KeyR':
+        if (e.ctrlKey) {
+          e.preventDefault()
+          if (isRecording) {
+            stopRecording()
+          } else {
+            startRecording()
+          }
+        }
+        break
+      case 'KeyS':
+        if (e.ctrlKey) {
+          e.preventDefault()
+          stopAudioAndRequests()
+        }
+        break
+      case 'ArrowLeft':
+        if (currentAudio) {
+          e.preventDefault()
+          skipAudio(-10) // Skip back 10 seconds
+        }
+        break
+      case 'ArrowRight':
+        if (currentAudio) {
+          e.preventDefault()
+          skipAudio(10) // Skip forward 10 seconds
+        }
+        break
+    }
+  }
+  
   // Load models and conversation history when component mounts
   useEffect(() => {
     fetchAvailableModels()
+    
+    // Add keyboard shortcuts
+    document.addEventListener('keydown', handleKeyDown)
     
     // Load conversation history from localStorage
     try {
@@ -498,7 +842,12 @@ export default function VoiceRecorder() {
     } catch (error) {
       console.error('Error loading conversation history:', error)
     }
-  }, [])
+    
+    return () => {
+      // Remove keyboard shortcuts
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isRecording, currentAudio, isAudioPlaying])
 
   // Initialize audio context and get microphone permission
   const initializeAudio = async () => {
@@ -1080,6 +1429,11 @@ export default function VoiceRecorder() {
         mediaRecorderRef.current.stop()
       }
       
+      // Stop text input recorder
+      if (textInputRecorder && textInputRecorder.state === 'recording') {
+        textInputRecorder.stop()
+      }
+      
       // Close AudioContext
       if (audioContextRef.current) {
         audioContextRef.current.close()
@@ -1157,14 +1511,39 @@ export default function VoiceRecorder() {
       {/* Text Input Section */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-            📝 Text Input Alternative
-          </h3>
+          <div className="flex items-center gap-3">
+            <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+              📝 Multimodal AI Input
+            </h3>
+            {/* Input Type Indicators */}
+            <div className="flex items-center gap-2 text-xs">
+              <div className="flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 rounded-full">
+                <span>📝</span>
+                <span className="text-blue-700 dark:text-blue-300 font-medium">Text</span>
+              </div>
+              <div className="flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/30 rounded-full">
+                <span>🖼️</span>
+                <span className="text-green-700 dark:text-green-300 font-medium">Images</span>
+              </div>
+              <div className="flex items-center gap-1 px-2 py-1 bg-red-100 dark:bg-red-900/30 rounded-full">
+                <span>📄</span>
+                <span className="text-red-700 dark:text-red-300 font-medium">Docs</span>
+              </div>
+              <div className="flex items-center gap-1 px-2 py-1 bg-purple-100 dark:bg-purple-900/30 rounded-full">
+                <span>🎥</span>
+                <span className="text-purple-700 dark:text-purple-300 font-medium">Media</span>
+              </div>
+              <div className="flex items-center gap-1 px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 rounded-full">
+                <span>💻</span>
+                <span className="text-yellow-700 dark:text-yellow-300 font-medium">Code</span>
+              </div>
+            </div>
+          </div>
           <button
             onClick={() => setShowTextInput(!showTextInput)}
             className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg transition-colors"
           >
-            {showTextInput ? 'Hide' : 'Show'} Text Input
+            {showTextInput ? 'Hide' : 'Show'} Multimodal Input
           </button>
         </div>
         
@@ -1190,11 +1569,23 @@ export default function VoiceRecorder() {
                         processTextInput()
                       }
                     }}
-                    placeholder="Paste text here or type directly. Use Ctrl+Enter to process with AI."
+                    placeholder="Type, paste, or use the 🎤 button to add speech-to-text. Use Ctrl+Enter to process with AI."
                     rows={4}
                     className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900 dark:text-gray-100"
                   />
                   <div className="absolute top-2 right-2 flex gap-2">
+                    <button
+                      onClick={isTextInputRecording ? stopTextInputRecording : startTextInputRecording}
+                      disabled={isProcessing}
+                      className={`p-1 transition-colors ${
+                        isTextInputRecording 
+                          ? 'text-red-500 hover:text-red-700 animate-pulse' 
+                          : 'text-gray-500 hover:text-blue-600'
+                      } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      title={isTextInputRecording ? 'Stop recording' : 'Record speech to text'}
+                    >
+                      {isTextInputRecording ? '🛑' : '🎤'}
+                    </button>
                     <button
                       onClick={handlePaste}
                       className="p-1 text-gray-500 hover:text-purple-600 transition-colors"
@@ -1252,7 +1643,14 @@ export default function VoiceRecorder() {
                         <>
                           <span className="font-medium">Drag & drop files here</span> or <span className="text-purple-600 font-medium">click to browse</span>
                           <br />
-                          <span className="text-xs text-gray-500">Supports images, documents, audio, video (max 50MB each)</span>
+                          <span className="text-xs text-gray-500">Images, PDFs, Office docs, audio, video, code files (max 50MB each)</span>
+                          <br />
+                          <div className="flex items-center justify-center gap-2 mt-2 text-xs">
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded">.jpg .png .gif</span>
+                            <span className="px-2 py-1 bg-red-100 text-red-700 rounded">.pdf .docx .xlsx</span>
+                            <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">.mp3 .mp4 .avi</span>
+                            <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded">.js .py .txt</span>
+                          </div>
                         </>
                       )}
                     </div>
@@ -1266,31 +1664,83 @@ export default function VoiceRecorder() {
                       Uploaded Files ({uploadedFiles.length}):
                     </div>
                     <div className="grid grid-cols-1 gap-2 max-h-32 overflow-y-auto">
-                      {uploadedFiles.map((file, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center justify-between p-2 bg-white dark:bg-gray-600 border border-gray-200 dark:border-gray-500 rounded-lg"
-                        >
-                          <div className="flex items-center gap-2 flex-1">
-                            <span className="text-lg">{getFileIcon(file)}</span>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                                {file.name}
-                              </div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">
-                                {file.type || 'Unknown type'} • {formatFileSize(file.size)}
+                      {uploadedFiles.map((file, index) => {
+                        const thumb = generateThumbnail(file)
+                        const isPrimary = primaryFileIndex === index
+                        const canMoveUp = index > 0
+                        const canMoveDown = index < uploadedFiles.length - 1
+                        const isImage = file.type.startsWith('image/')
+                        const quickDescribePrompt = isImage ? 'Please describe the primary image in detail.' : 'Please summarize the primary document/media and key points.'
+                        return (
+                          <div
+                            key={index}
+                            className={`flex items-center justify-between p-2 bg-white dark:bg-gray-600 border ${isPrimary ? 'border-purple-400' : 'border-gray-200 dark:border-gray-500'} rounded-lg`}
+                          >
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              {thumb ? (
+                                <img src={thumb} alt={file.name} className="w-10 h-10 object-cover rounded border" />
+                              ) : (
+                                <span className="text-lg">{getFileIcon(file)}</span>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                                    {file.name}
+                                  </div>
+                                  {isPrimary && (
+                                    <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">Primary</span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-100/80 md:text-gray-500 dark:text-gray-300 truncate">
+                                  {file.type || 'Unknown type'} • {formatFileSize(file.size)}
+                                </div>
+                                {/* Actions */}
+                                <div className="mt-1 flex items-center gap-2 text-xs">
+                                  <label className="inline-flex items-center gap-1 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="primaryFile"
+                                      checked={isPrimary}
+                                      onChange={() => setPrimaryFile(index)}
+                                    />
+                                    <span>Set Primary</span>
+                                  </label>
+                                  <button
+                                    onClick={() => canMoveUp && moveFile(index, index - 1)}
+                                    disabled={!canMoveUp}
+                                    className={`px-2 py-0.5 rounded border ${canMoveUp ? 'text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-500' : 'opacity-40 cursor-not-allowed'}`}
+                                    title="Move up"
+                                  >
+                                    ↑
+                                  </button>
+                                  <button
+                                    onClick={() => canMoveDown && moveFile(index, index + 1)}
+                                    disabled={!canMoveDown}
+                                    className={`px-2 py-0.5 rounded border ${canMoveDown ? 'text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-500' : 'opacity-40 cursor-not-allowed'}`}
+                                    title="Move down"
+                                  >
+                                    ↓
+                                  </button>
+                                  <button
+                                    onClick={() => processSingleFile(index, quickDescribePrompt)}
+                                    className="px-2 py-0.5 rounded bg-purple-600 hover:bg-purple-700 text-white"
+                                    title="Describe/Summarize this file"
+                                  >
+                                    Ask about this
+                                  </button>
+                                </div>
                               </div>
                             </div>
+                            <button
+                              onClick={() => removeFile(index)}
+                              className="p-1 text-red-500 hover:text-red-700 transition-colors"
+                              title="Remove file"
+                            >
+                              ✖️
+                            </button>
                           </div>
-                          <button
-                            onClick={() => removeFile(index)}
-                            className="p-1 text-red-500 hover:text-red-700 transition-colors"
-                            title="Remove file"
-                          >
-                            ✖️
-                          </button>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -1299,9 +1749,36 @@ export default function VoiceRecorder() {
             
             <div className="flex items-center justify-between">
               <div className="text-sm text-gray-500 dark:text-gray-400">
-                {textInput.length} characters{uploadedFiles.length > 0 && ` • ${uploadedFiles.length} files`} • Multimodal AI input
+                {textInput.length > 0 && `${textInput.length} characters`}
+                {uploadedFiles.length > 0 && `${textInput.length > 0 ? ' • ' : ''}${uploadedFiles.length} files attached`}
+                {textInput.length === 0 && uploadedFiles.length === 0 && 'Add text or files to process'}
+                {uploadedFiles.length > 0 && ' • Files can be processed without text!'}
+                {/* Status indicators */}
+                {processingStatus && (
+                  <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                    📊 {processingStatus}
+                  </div>
+                )}
+                {lastProcessedFiles.length > 0 && (
+                  <div className="text-xs text-green-600 dark:text-green-400 mt-1">
+                    ✅ Last processed: {lastProcessedFiles.join(', ')}
+                  </div>
+                )}
               </div>
               <div className="flex gap-2">
+                {/* Stop Button - only show when processing */}
+                {(isLlmProcessing || currentAudio) && (
+                  <button
+                    onClick={stopAudioAndRequests}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                    title="Stop processing and audio playback"
+                  >
+                    <StopIcon className="h-4 w-4" />
+                    Stop
+                  </button>
+                )}
+                
+                {/* Process Button */}
                 <button
                   onClick={processTextInput}
                   disabled={(!textInput.trim() && uploadedFiles.length === 0) || isLlmProcessing}
@@ -1314,7 +1791,8 @@ export default function VoiceRecorder() {
                     </>
                   ) : (
                     <>
-                      {uploadedFiles.length > 0 ? '📁🤖' : '🤖'} Process with AI
+                      {uploadedFiles.length > 0 && !textInput.trim() ? '📁 Analyze Files' : 
+                       uploadedFiles.length > 0 ? '📁🤖 Process All' : '🤖 Process with AI'}
                     </>
                   )}
                 </button>
@@ -1731,9 +2209,77 @@ export default function VoiceRecorder() {
                 
                 {/* Audio Playback Indicator */}
                 {currentAudio && (
-                  <div className="mt-4 flex items-center gap-2 text-purple-600 dark:text-purple-400 text-sm">
-                    <SpeakerWaveIcon className="h-4 w-4 animate-pulse" />
-                    <span>Audio playing... Use stop button to cancel</span>
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={toggleAudioPlayback}
+                        className="px-3 py-1 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm"
+                      >
+                        {isAudioPlaying ? '⏸️ Pause' : '▶️ Play'}
+                      </button>
+                      <button
+                        onClick={() => skipAudio(-10)}
+                        className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-sm"
+                        title="Back 10s"
+                      >
+                        ⏪ 10s
+                      </button>
+                      <button
+                        onClick={() => skipAudio(10)}
+                        className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-sm"
+                        title="Forward 10s"
+                      >
+                        10s ⏩
+                      </button>
+                      <button
+                        onClick={stopAudioAndRequests}
+                        className="px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-sm"
+                        title="Stop"
+                      >
+                        ⏹️ Stop
+                      </button>
+                      <div className="text-xs text-purple-700 dark:text-purple-300">
+                        {formatTime(audioProgress)} / {formatTime(audioDuration || currentAudio.duration || 0)}
+                      </div>
+                    </div>
+                    {/* Seek bar */}
+                    <input
+                      type="range"
+                      min={0}
+                      max={audioDuration || currentAudio.duration || 0}
+                      step={0.1}
+                      value={Math.min(audioProgress, audioDuration || currentAudio.duration || 0)}
+                      onChange={(e) => seekAudio(parseFloat(e.target.value))}
+                      className="w-full"
+                    />
+                    {/* Volume & Speed */}
+                    <div className="flex items-center gap-6">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">🔊</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={audioVolume}
+                          onChange={(e) => changeAudioVolume(parseFloat(e.target.value))}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">⏱️ Speed</span>
+                        <select
+                          value={audioSpeed}
+                          onChange={(e) => changeAudioSpeed(parseFloat(e.target.value))}
+                          className="px-2 py-1 rounded border bg-white dark:bg-gray-700"
+                        >
+                          <option value={0.75}>0.75x</option>
+                          <option value={1}>1x</option>
+                          <option value={1.25}>1.25x</option>
+                          <option value={1.5}>1.5x</option>
+                          <option value={2}>2x</option>
+                        </select>
+                      </div>
+                    </div>
                   </div>
                 )}
               </motion.div>

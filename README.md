@@ -1,6 +1,6 @@
 # 🎙️ Ultimate Voice Bridge
 
-> **State-of-the-art STT-TTS-LLM voice bridge application with real-time audio processing**
+> **Production-Ready v4.0** - Professional voice-to-LLM bridge with industry-standard controls and multimodal AI capabilities
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
@@ -8,62 +8,79 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
 
-A professional-grade, full-stack voice processing application that bridges Speech-to-Text (STT), Large Language Models (LLM), and Text-to-Speech (TTS) with real-time audio streaming, voice cloning, and enterprise-level performance.
+A professional-grade voice processing application that seamlessly bridges Speech-to-Text, Large Language Models, and Text-to-Speech with **comprehensive audio controls**, **primary file selection**, and **industry-standard user experience**.
 
-## 🚀 Features
+## 🚀 What's New in v4.0 - Professional Edition
 
-### 🆕 Latest Features (v3.0 - Production Ready)
-- **🤖 Dynamic Model Selector**: Switch between 17+ LM Studio models on-the-fly
-- **📝 Rich Text Input**: Paste or type text with Ctrl+V clipboard integration
-- **📁 Multimodal File Upload**: Drag & drop images, PDFs, documents, audio, video
-- **🔊 TTS Replay**: "Read Aloud" buttons for current and historical responses
-- **📄 Real-time Transcription**: Live STT display during recording
-- **📚 Conversation History**: Persistent storage with export and statistics
-- **🎯 Enhanced Metadata**: Full AI reasoning, processing times, confidence scores
-- **🛑 Smart Stop Controls**: Cancel any operation instantly
+### ✨ **Professional Audio Controls**
+- **🎵 Full Playback Control**: Play/pause, seek bar, volume slider, and speed control (0.75x-2x)
+- **⏭️ Skip Navigation**: 10-second forward/back with visual feedback and time display
+- **🛑 Immediate Stop Control**: Cancel processing and audio playback instantly
+- **⌨️ Keyboard Shortcuts**: Spacebar (play/pause), Esc (stop), Arrow keys (skip)
 
-### 🔥 Core Capabilities
+### 🎯 **Primary File Selection & Verification**
+- **🖼️ Image Thumbnails**: Visual preview of uploaded images before processing
+- **🎯 Primary File Designation**: Radio buttons to select which file is the main focus
+- **🔄 File Reordering**: Move files up/down with arrow controls
+- **🎬 Per-File Quick Actions**: "Ask about this" buttons for individual file analysis
+- **✅ Processing Verification**: See exactly which files were processed
 
-#### 🎤 **Advanced Voice Processing**
+### 🎤 **Voice-First Workflow Enhancement**
+- **🎙️ Speech-to-Text for Text Input**: Microphone button in text area for voice prompts
+- **🔗 Seamless Integration**: Speak "describe this image" while uploading files
+- **📝 Smart Text Appending**: Spoken text automatically appends to typed text
+- **🎯 Context Preservation**: Maintains conversation flow between voice and text
+
+### 🛡️ **Professional Error Handling & Recovery**
+- **🔄 Automatic Retry Logic**: Network failures retry up to 2 times with backoff
+- **📋 Categorized Error Messages**: Network, server, format, and connection-specific errors
+- **🎯 Status Indicators**: Real-time connection status and processing feedback
+- **📊 Progress Tracking**: Clear visual feedback on current operation status
+
+### ⌨️ **Complete Keyboard Shortcuts System**
+- **Spacebar**: Play/pause audio playback
+- **Escape**: Stop/cancel all operations
+- **Ctrl+R**: Toggle voice recording
+- **Ctrl+S**: Stop processing
+- **Ctrl+Enter**: Process input (in text areas)
+- **Arrow Left/Right**: Skip audio back/forward (when playing)
+
+## 🔥 Core Features
+
+### 🎤 **Advanced Voice Processing**
 - **Real-time Audio Visualization**: 20-bar dynamic frequency display with extreme sensitivity
 - **Professional Recording**: 16kHz WebM/Opus with noise suppression and echo cancellation
 - **Live Transcription**: Real-time STT display during recording with confidence scores
 - **TTS Replay System**: Re-synthesize and replay any AI response on demand
 - **Voice Activity Detection**: Automatic silence trimming and audio enhancement
 
-#### 🤖 **Intelligent LLM Integration**
+### 🤖 **Intelligent LLM Integration**
 - **Multi-Model Support**: 17+ LM Studio models with dynamic switching
 - **Enhanced Metadata**: Processing times, token counts, and full AI reasoning display
 - **Request Management**: Cancel operations mid-processing with AbortController
 - **Model Persistence**: Remembers preferred models across sessions
 - **Error Recovery**: Comprehensive error handling and user feedback
 
-#### 📁 **Multimodal File Processing**
-- **Drag & Drop Upload**: Visual feedback and multi-file support
+### 📁 **Advanced Multimodal File Processing**
+- **Drag & Drop Upload**: Visual feedback and multi-file support with thumbnails
+- **Primary File Selection**: Designate which file is the main focus for AI analysis
+- **File Management**: Reordering, individual removal, size validation (50MB limit)
 - **Comprehensive Formats**: Images (JPG, PNG, GIF, WebP), Documents (PDF, Word, Excel), Audio/Video, Code files
-- **File Management**: Individual removal, size validation (50MB limit), type-specific icons
-- **Combined Processing**: Text + files + voice in single AI interaction
+- **Processing Verification**: Backend confirms which files were processed
 
-#### 📚 **Rich Conversation Management**
+### 📚 **Rich Conversation Management**
 - **Persistent History**: Stores last 50 conversations with full metadata
 - **Export Functionality**: JSON export with conversation data
 - **Statistics Dashboard**: Token usage, processing times, conversation counts
 - **AI Reasoning Display**: Expandable thought process for transparency
-- **Search & Filter**: Find specific conversations (coming soon)
+- **Replay Controls**: TTS replay for any historical response
 
-#### 🎨 **Professional UI/UX**
-- **Dark/Light Themes**: System-aware theme switching
-- **Responsive Design**: Works on desktop, tablet, and mobile
+### 🎨 **Professional UI/UX**
+- **Responsive Design**: Works perfectly on desktop, tablet, and mobile
 - **Smooth Animations**: Framer Motion transitions and micro-interactions
-- **Keyboard Shortcuts**: Ctrl+Enter, Ctrl+V, and more for power users
-- **Visual Feedback**: Loading states, hover effects, and status indicators
-
-### Technical Excellence
-- **⚡ Performance**: GPU acceleration, WebSocket streaming, async processing
-- **🔒 Security**: End-to-end encryption, rate limiting, CORS protection
-- **📊 Monitoring**: Real-time performance metrics, logging, and analytics
-- **🐳 DevOps**: Docker containerization, CI/CD pipelines, auto-scaling
-- **🧪 Testing**: Comprehensive test coverage with Jest and Pytest
+- **Visual Status Feedback**: Connection status, processing indicators, file verification
+- **Accessibility First**: ARIA labels, keyboard navigation, screen reader support
+- **Settings Panel**: Theme selection, audio preferences, shortcuts customization
 
 ## 🏗️ Architecture
 
@@ -74,8 +91,8 @@ A professional-grade, full-stack voice processing application that bridges Speec
 │                 │    │                 │    │                 │
 │ • React UI      │    │ • WebSocket     │    │ • STT (Whisper) │
 │ • TypeScript    │    │ • Rate Limiting │    │ • LLM Bridge    │
-│ • Tailwind CSS  │    │ • Authentication│    │ • TTS (Coqui)   │
-│ • Audio Capture │    │ • Load Balancer │    │ • Voice Clone   │
+│ • Audio Controls│    │ • File Handling │    │ • TTS (Coqui)   │
+│ • File Preview  │    │ • Error Recovery│    │ • Voice Clone   │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          │                       │                       │
@@ -89,16 +106,16 @@ A professional-grade, full-stack voice processing application that bridges Speec
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **Frontend** | Next.js 14 + TypeScript | Modern React framework with SSR |
-| **Backend** | FastAPI + Python 3.9+ | High-performance async API |
+| **Frontend** | Next.js 14 + TypeScript | Modern React framework with professional UI controls |
+| **Backend** | FastAPI + Python 3.9+ | High-performance async API with file handling |
 | **STT Engine** | OpenAI Whisper | State-of-the-art speech recognition |
-| **LLM** | LM Studio / OpenAI / Anthropic | Flexible LLM integration |
-| **TTS Engine** | Coqui TTS + Voice Cloning | Professional voice synthesis |
-| **Database** | Redis + SQLite | Session management & caching |
-| **Deployment** | Docker + Nginx | Containerized production setup |
-| **CI/CD** | GitHub Actions | Automated testing & deployment |
+| **LLM** | LM Studio / OpenAI / Anthropic | Flexible LLM integration with model switching |
+| **TTS Engine** | Edge TTS + Voice Cloning | Professional voice synthesis |
+| **Audio Processing** | Web Audio API | Real-time audio visualization and controls |
+| **File Processing** | FormData + Thumbnails | Multimodal file handling with preview |
+| **UI Framework** | Tailwind CSS + Framer Motion | Responsive design with smooth animations |
 
-## 😦 Quick Start
+## 🚀 Quick Start
 
 ### 🖥️ Super Quick Start (Windows)
 1. **Clone the repository**
@@ -114,16 +131,13 @@ A professional-grade, full-stack voice processing application that bridges Speec
 ### Prerequisites
 - **Node.js 18+** and npm 9+
 - **Python 3.9+** and pip
-- **Docker Desktop** (optional, recommended)
+- **LM Studio** (for local LLM models)
 - **CUDA Toolkit** (optional, for GPU acceleration)
 
 ### 1. Clone & Setup
 ```bash
 git clone https://github.com/TacImpulse/ultimate-voice-bridge.git
 cd ultimate-voice-bridge
-
-# Copy environment file
-cp .env.example .env
 
 # Install all dependencies
 npm run setup
@@ -140,218 +154,144 @@ ANTHROPIC_API_KEY=your-anthropic-api-key
 LM_STUDIO_BASE_URL=http://localhost:1234/v1
 ```
 
-### 3. Run Development Server
+### 3. Run Development Servers
 ```bash
 # Start both frontend and backend
 npm run dev
 
-# Or individually:
-npm run dev:frontend  # http://localhost:3000
-npm run dev:backend   # http://localhost:8000
+# Or start individually:
+# Terminal 1: Backend (port 8001)
+cd backend && python main.py
+
+# Terminal 2: Frontend (port 3000)  
+cd frontend && npm run dev
 ```
 
-### 4. 🎤 Quick Start Voice Recording
+### 4. 🎤 Start Using the Voice Bridge
+1. **Open**: http://localhost:3000
+2. **Select Model**: Choose your preferred LLM from the dropdown
+3. **Upload Files**: Drag & drop images/documents, set primary file
+4. **Voice Input**: Use 🎤 button in text area or main voice recorder
+5. **Process**: Click "Process with AI" and enjoy full audio controls
+6. **Control**: Use spacebar, escape, and audio controls as needed
 
-**PowerShell (Windows):**
-```powershell
-# Start both servers with one script
-.\start-servers.ps1
+## 📱 Usage Guide
+
+### 🎯 **Professional Workflow**
+1. **File Upload & Selection**:
+   - Drag & drop multiple files
+   - See image thumbnails immediately
+   - Use radio buttons to set primary file
+   - Reorder files with up/down arrows
+
+2. **Voice-First Input**:
+   - Click 🎤 in text area to speak prompts
+   - Use main recorder for longer conversations
+   - Text and voice seamlessly combine
+
+3. **Audio Control Mastery**:
+   - **Spacebar**: Play/pause any TTS audio
+   - **Arrow keys**: Skip forward/back during playback
+   - **Seek bar**: Jump to any position in audio
+   - **Volume/Speed**: Adjust playback to your preference
+
+4. **Error Recovery**:
+   - Network failures automatically retry
+   - **Escape**: Cancel any stuck operation
+   - Clear status indicators show what's happening
+
+### 🎛️ **Keyboard Shortcuts Reference**
+| Shortcut | Action | Context |
+|----------|--------|---------|
+| **Spacebar** | Play/pause audio | When audio is available |
+| **Escape** | Stop/cancel all | Global |
+| **Ctrl+R** | Toggle recording | Global |
+| **Ctrl+S** | Stop processing | Global |
+| **Ctrl+Enter** | Process input | Text areas |
+| **← / →** | Skip audio ±10s | During playback |
+
+### 🔧 **File Processing Tips**
+- **Primary files** are highlighted with purple borders
+- Use **"Ask about this"** for individual file analysis
+- **Thumbnails** show exactly what image will be processed
+- **File verification** confirms backend processed correct files
+
+## 🎛️ Configuration
+
+### Settings Panel
+Access via the settings button in the interface:
+- **Theme Selection**: Light/dark mode preferences
+- **Audio Settings**: Input/output device selection
+- **Voice Options**: TTS voice and quality settings
+- **Keyboard Shortcuts**: Customize hotkey bindings
+- **Privacy Settings**: Data retention and privacy controls
+
+### Environment Variables
+```env
+# LLM Configuration
+LM_STUDIO_BASE_URL=http://localhost:1234/v1
+OPENAI_API_KEY=your-key-here
+ANTHROPIC_API_KEY=your-key-here
+
+# Audio Settings
+MAX_RECORDING_DURATION=300
+AUDIO_SAMPLE_RATE=16000
+AUDIO_CHANNELS=1
+
+# File Upload Limits
+MAX_FILE_SIZE=52428800  # 50MB
+MAX_FILES_PER_REQUEST=5
+
+# UI Configuration
+DEFAULT_THEME=auto
+ENABLE_ANIMATIONS=true
+SHOW_DEBUG_INFO=false
 ```
 
-**Manual Start:**
-```bash
-# Terminal 1: Start backend with GPU support
-cd backend
-python main.py
+## 🧪 Testing
 
-# Terminal 2: Start frontend 
-cd frontend
-npm run dev
-
-# Open http://localhost:3001/voice to test!
-```
-
-### 5. 🐳 Docker (Production)
-```bash
-# Start entire stack with one command
-docker-compose up
-
-# Production mode
-docker-compose -f docker-compose.prod.yml up
-```
-
-## 📱 Usage
-
-### 🎤 Enhanced Voice Chat Interface
-1. **Launch**: Double-click your desktop shortcut or go to http://localhost:3000/voice
-2. **Select Model**: Choose from 17+ available LM Studio models in the dropdown
-3. **Record**: Click the red microphone button and speak clearly
-4. **Process**: Click the purple model button to start the full AI pipeline
-5. **Experience**: Watch the conversation flow:
-   - 🎤 **Your Speech**: See transcription with confidence and language detection
-   - 🤔 **AI Thinking**: Watch reasoning models show their thought process
-   - 🎧 **AI Response**: Hear Ava speak with automatic audio playback
-6. **Control**: Use the stop button to cancel audio or requests anytime
-
-**🆕 New Features:**
-- **Smart Model Switching**: 17+ models including uncensored options
-- **Stop Control**: Instantly stop chatty AI responses
-- **Enhanced Transcription**: Language, confidence, device, and timing details
-- **AI Reasoning**: See how reasoning models think through problems
-- **Performance Stats**: Real-time STT/LLM/TTS processing times
-- **Desktop Shortcuts**: One-click launching with automatic browser opening
-
-**Classic Features:**
-- Real-time audio visualization with 20-band frequency display
-- Recording timer and audio playback
-- GPU-accelerated Whisper transcription (typically <1 second)
-- Voice activity detection and silence trimming
-- Professional UI with smooth animations
-
-### API Endpoints
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# STT transcription
-curl -X POST http://localhost:8000/api/v1/stt \
-  -F "audio=@audio.wav"
-
-# Text-to-speech
-curl -X POST http://localhost:8000/api/v1/tts \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Hello world", "voice": "default"}'
-
-# Real-time WebSocket
-wscat -c ws://localhost:8000/ws
-```
-
-## 🎯 Development
-
-### Project Structure
-```
-ultimate-voice-bridge/
-├── frontend/                 # Next.js React app
-│   ├── components/          # Reusable UI components
-│   ├── pages/              # Next.js pages
-│   ├── hooks/              # Custom React hooks
-│   └── utils/              # Helper functions
-├── backend/                 # FastAPI Python app
-│   ├── app/                # Main application
-│   ├── services/           # STT, TTS, LLM services
-│   ├── models/             # Pydantic models
-│   └── utils/              # Helper utilities
-├── docs/                   # Documentation
-├── .github/                # GitHub workflows
-└── docker-compose.yml     # Container orchestration
-```
-
-### Development Commands
-```bash
-# Frontend development
-cd frontend
-npm run dev          # Development server
-npm run build        # Production build
-npm run lint         # ESLint + TypeScript check
-npm test             # Jest testing
-
-# Backend development
-cd backend
-uvicorn main:app --reload    # Development server
-pytest                       # Run tests
-black . && isort .          # Code formatting
-mypy .                      # Type checking
-```
-
-### Testing
 ```bash
 # Run all tests
-npm test                    # Frontend tests
-cd backend && pytest       # Backend tests
+npm run test
 
-# Test coverage
-npm run test:coverage       # Frontend coverage
-cd backend && pytest --cov # Backend coverage
+# Frontend tests
+cd frontend && npm test
+
+# Backend tests  
+cd backend && pytest
+
+# Integration tests
+npm run test:integration
+
+# Performance benchmarks
+npm run benchmark
 ```
 
-## 🔧 Configuration
+## 📊 Performance Metrics
 
-### Voice Models
-```yaml
-# STT Configuration
-WHISPER_MODEL: "base"       # tiny, base, small, medium, large
-WHISPER_LANGUAGE: "auto"    # auto-detect or specific language
+| Metric | Value | Notes |
+|--------|-------|-------|
+| **STT Latency** | <200ms | RTX 5090 GPU acceleration |
+| **LLM Response** | 1-3s | Depends on model and complexity |
+| **TTS Generation** | <1s | Edge TTS optimized |
+| **File Processing** | <5s | 50MB limit per file |
+| **Audio Controls** | <50ms | Real-time responsiveness |
 
-# TTS Configuration  
-TTS_MODEL: "tts_models/en/ljspeech/tacotron2-DDC"
-ENABLE_VOICE_CLONING: true
-```
+## 🎯 Roadmap
 
-### Performance Tuning
-```yaml
-# Audio Settings
-AUDIO_SAMPLE_RATE: 16000
-MAX_AUDIO_DURATION: 300
-AUDIO_CHUNK_SIZE: 1024
+### 🔄 **Coming Soon**
+- [ ] **Advanced Export Options** - PDF reports, Word documents, Markdown
+- [ ] **Conversation Search** - Full-text search through history
+- [ ] **Voice Cloning** - Custom voice generation and cloning
+- [ ] **Multi-language UI** - Internationalization support
+- [ ] **Plugin System** - Custom integrations and extensions
 
-# Rate Limiting
-RATE_LIMIT_REQUESTS_PER_MINUTE: 60
-RATE_LIMIT_CONCURRENT_SESSIONS: 10
-```
-
-## 🚀 Deployment
-
-### Production Docker
-```bash
-# Build production images
-docker-compose -f docker-compose.prod.yml build
-
-# Deploy with GPU support
-docker-compose -f docker-compose.prod.yml up -d
-```
-
-### Cloud Deployment
-- **AWS**: EC2 + ECS + Load Balancer
-- **GCP**: Cloud Run + Cloud SQL + CDN  
-- **Azure**: Container Instances + Cosmos DB
-
-## 🤝 Contributing
-
-We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Workflow
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
-
-### Code Standards
-- **Frontend**: ESLint + Prettier + TypeScript strict
-- **Backend**: Black + isort + mypy + pytest
-- **Commits**: Conventional Commits format
-- **Testing**: Minimum 80% code coverage
-
-## 📊 Performance
-
-### Benchmarks
-- **STT Latency**: <200ms (base model, CPU)
-- **LLM Response**: <1s (depends on model)
-- **TTS Generation**: <500ms (standard voice)
-- **End-to-End**: <2s total pipeline time
-
-### Scaling
-- **Concurrent Users**: 100+ (single instance)
-- **Audio Processing**: Real-time streaming
-- **GPU Acceleration**: 10x faster inference
-- **Horizontal Scaling**: Kubernetes ready
-
-## 📚 Documentation
-
-- [API Documentation](docs/api.md)
-- [Voice Model Guide](docs/voice-models.md)
-- [Deployment Guide](docs/deployment.md)
-- [Troubleshooting](docs/troubleshooting.md)
+### 🔮 **Future Plans**
+- [ ] **Real-time Collaboration** - Multi-user voice sessions
+- [ ] **Advanced Analytics** - Usage patterns and insights
+- [ ] **Mobile Applications** - iOS and Android native apps
+- [ ] **API Marketplace** - Third-party integrations
+- [ ] **Enterprise Features** - SSO, audit logs, team management
 
 ## 📄 License
 
@@ -359,20 +299,19 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- [OpenAI Whisper](https://github.com/openai/whisper) - Speech recognition
-- [Coqui TTS](https://github.com/coqui-ai/TTS) - Text-to-speech
-- [FastAPI](https://fastapi.tiangolo.com/) - Modern Python framework
-- [Next.js](https://nextjs.org/) - React production framework
+- **OpenAI Whisper** - Revolutionary speech recognition
+- **LM Studio** - Local LLM hosting made easy  
+- **Microsoft Edge TTS** - High-quality text-to-speech
+- **Next.js & FastAPI** - Modern web framework foundations
+- **Framer Motion** - Beautiful UI animations
+- **Tailwind CSS** - Utility-first styling
 
-## 💬 Support
+## 📞 Support
 
-- 📧 Email: support@voicebridge.dev
-- 💬 Discord: [Join our community](https://discord.gg/voicebridge)
-- 🐛 Issues: [GitHub Issues](https://github.com/YOUR-USERNAME/ultimate-voice-bridge/issues)
-- 📖 Docs: [Documentation Site](https://docs.voicebridge.dev)
+- **Documentation**: [Wiki](https://github.com/TacImpulse/ultimate-voice-bridge/wiki)
+- **Issues**: [GitHub Issues](https://github.com/TacImpulse/ultimate-voice-bridge/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/TacImpulse/ultimate-voice-bridge/discussions)
 
 ---
 
-⭐ **Star this repo if you find it helpful!**
-
-Made with ❤️ by [TacImpulse](https://github.com/TacImpulse)
+**Made with ❤️ by TacImpulse** - Bridging the gap between human voice and artificial intelligence.
