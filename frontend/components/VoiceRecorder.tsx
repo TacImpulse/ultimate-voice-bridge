@@ -962,100 +962,136 @@ export default function VoiceRecorder() {
           )}
         </AnimatePresence>
 
-        {/* Enhanced Conversation Flow */}
+        {/* 3-Window Enhanced Conversation Flow */}
         <AnimatePresence>
           {llmResponse && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="mt-8 space-y-4"
+              className="mt-8 space-y-6"
             >
-              {/* User Speech (What you said) */}
-              <div className="p-6 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
-                <div className="flex items-start gap-3 mb-4">
-                  <MicrophoneIcon className="h-6 w-6 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <h3 className="text-blue-600 dark:text-blue-400 font-semibold text-lg">
-                      🎤 What You Said
-                    </h3>
-                    <div className="flex items-center gap-4 text-blue-600/80 dark:text-blue-400/80 text-sm">
-                      <span>Language: {llmResponse.transcript_details?.language?.toUpperCase() || 'Unknown'}</span>
-                      <span>Confidence: {((llmResponse.transcript_details?.confidence || 0) * 100).toFixed(1)}%</span>
-                      <span>Device: {llmResponse.transcript_details?.device || 'Unknown'}</span>
-                      <span>Time: {llmResponse.processing_time?.stt?.toFixed(2) || 0}s</span>
+              {/* WINDOW 1: STT Recognition - What You Said */}
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.1 }}
+                className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/30 dark:to-blue-800/20 p-6 rounded-xl border border-blue-200 dark:border-blue-800 shadow-lg"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-600 rounded-lg">
+                      <MicrophoneIcon className="h-6 w-6 text-white" />
                     </div>
+                    <div>
+                      <h3 className="text-blue-900 dark:text-blue-100 font-bold text-xl">
+                        🎤 STT Recognition Window
+                      </h3>
+                      <p className="text-blue-700 dark:text-blue-300 text-sm">
+                        Speech-to-Text Analysis • Powered by Whisper on {llmResponse.transcript_details?.device || 'CUDA'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right text-blue-600 dark:text-blue-400 text-sm">
+                    <div>Language: <strong>{llmResponse.transcript_details?.language?.toUpperCase() || 'Unknown'}</strong></div>
+                    <div>Confidence: <strong>{((llmResponse.transcript_details?.confidence || 0) * 100).toFixed(1)}%</strong></div>
+                    <div>Processing: <strong>{llmResponse.processing_time?.stt?.toFixed(2) || 0}s</strong></div>
                   </div>
                 </div>
                 
-                <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border">
-                  <p className="text-gray-900 dark:text-gray-100 text-lg leading-relaxed">
+                <div className="bg-white dark:bg-gray-800 p-5 rounded-lg border-2 border-blue-200 dark:border-blue-700 shadow-inner">
+                  <p className="text-gray-900 dark:text-gray-100 text-lg leading-relaxed font-medium">
                     "{llmResponse.transcript || 'No speech detected'}"
                   </p>
                 </div>
-              </div>
+              </motion.div>
 
-              {/* AI Thinking Process Summary (if available) */}
+              {/* WINDOW 2: AI Reasoning - How Ava Thinks */}
               {llmResponse.llm_reasoning && (
                 <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="p-6 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl border border-yellow-200 dark:border-yellow-800"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="bg-gradient-to-br from-yellow-50 to-yellow-100 dark:from-yellow-900/30 dark:to-yellow-800/20 p-6 rounded-xl border border-yellow-200 dark:border-yellow-800 shadow-lg"
                 >
-                  <div className="flex items-start gap-3 mb-4">
-                    <ArrowPathIcon className="h-6 w-6 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <h3 className="text-yellow-600 dark:text-yellow-400 font-semibold text-lg">
-                        🤔 AI Thinking Process
-                      </h3>
-                      <p className="text-yellow-600/80 dark:text-yellow-400/80 text-sm">
-                        How the AI reasoned through your question (preview)
-                      </p>
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-yellow-600 rounded-lg">
+                        <ArrowPathIcon className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="text-yellow-900 dark:text-yellow-100 font-bold text-xl">
+                          🤔 AI Reasoning Window
+                        </h3>
+                        <p className="text-yellow-700 dark:text-yellow-300 text-sm">
+                          Internal Thought Process • {llmResponse.llm_details?.model?.replace('bytedance/', '').replace('seed-', '') || 'AI Model'}
+                        </p>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => setShowReasoningPanel(true)}
-                      className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                      🔍 View Full Reasoning
-                    </button>
+                    <div className="flex gap-2">
+                      <div className="text-right text-yellow-600 dark:text-yellow-400 text-sm">
+                        <div>Length: <strong>{llmResponse.llm_reasoning.length} chars</strong></div>
+                        <div>Lines: <strong>~{Math.ceil(llmResponse.llm_reasoning.length / 80)}</strong></div>
+                      </div>
+                      <button
+                        onClick={() => setShowReasoningPanel(true)}
+                        className="px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-xs font-medium transition-colors"
+                      >
+                        🔍 Full View
+                      </button>
+                    </div>
                   </div>
                   
-                  <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border">
-                    <p className="text-gray-900 dark:text-gray-100 leading-relaxed whitespace-pre-wrap text-sm">
-                      {llmResponse.llm_reasoning.slice(0, 300)}{llmResponse.llm_reasoning.length > 300 ? '...' : ''}
-                    </p>
-                    {llmResponse.llm_reasoning.length > 300 && (
-                      <p className="text-yellow-600 text-xs mt-2">
-                        ✨ {llmResponse.llm_reasoning.length} characters of reasoning available - click "View Full Reasoning" above
-                      </p>
-                    )}
+                  <div className="bg-white dark:bg-gray-800 p-5 rounded-lg border-2 border-yellow-200 dark:border-yellow-700 shadow-inner max-h-48 overflow-y-auto">
+                    <pre className="text-gray-900 dark:text-gray-100 leading-relaxed whitespace-pre-wrap text-sm font-mono">
+                      {llmResponse.llm_reasoning.slice(0, 500)}{llmResponse.llm_reasoning.length > 500 ? '\n\n... (click "Full View" to see complete reasoning)' : ''}
+                    </pre>
                   </div>
                 </motion.div>
               )}
 
-              {/* AI Response (What Ava said) */}
-              <div className="p-6 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
-                <div className="flex items-start gap-3 mb-4">
-                  <SpeakerWaveIcon className="h-6 w-6 text-purple-600 dark:text-purple-400 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <h3 className="text-purple-600 dark:text-purple-400 font-semibold text-lg">
-                      🎙️ Ava's Response
-                    </h3>
-                    <div className="flex items-center gap-4 text-purple-600/80 dark:text-purple-400/80 text-sm">
-                      <span>Model: {llmResponse.llm_details?.model?.replace('bytedance/', '').replace('seed-', '') || selectedModel}</span>
-                      <span>Tokens: {llmResponse.llm_details?.tokens || 0}</span>
-                      <span>Time: {llmResponse.processing_time?.llm?.toFixed(2) || 0}s</span>
-                      <span>TTS: {llmResponse.processing_time?.tts?.toFixed(2) || 0}s</span>
+              {/* WINDOW 3: AI Vocalized Response - What Ava Says */}
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.3 }}
+                className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/30 dark:to-purple-800/20 p-6 rounded-xl border border-purple-200 dark:border-purple-800 shadow-lg"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-600 rounded-lg">
+                      <SpeakerWaveIcon className="h-6 w-6 text-white" />
                     </div>
+                    <div>
+                      <h3 className="text-purple-900 dark:text-purple-100 font-bold text-xl">
+                        🎙️ Ava's Vocalized Response
+                      </h3>
+                      <p className="text-purple-700 dark:text-purple-300 text-sm">
+                        AI Generated Response • {llmResponse.llm_details?.model?.replace('bytedance/', '').replace('seed-', '') || selectedModel}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right text-purple-600 dark:text-purple-400 text-sm">
+                    <div>Tokens: <strong>{llmResponse.llm_details?.tokens || 0}</strong></div>
+                    <div>LLM Time: <strong>{llmResponse.processing_time?.llm?.toFixed(2) || 0}s</strong></div>
+                    <div>TTS Time: <strong>{llmResponse.processing_time?.tts?.toFixed(2) || 0}s</strong></div>
                   </div>
                 </div>
                 
-                <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border">
-                  <p className="text-gray-900 dark:text-gray-100 text-lg leading-relaxed whitespace-pre-wrap">
+                <div className="bg-white dark:bg-gray-800 p-5 rounded-lg border-2 border-purple-200 dark:border-purple-700 shadow-inner">
+                  <p className="text-gray-900 dark:text-gray-100 text-lg leading-relaxed whitespace-pre-wrap font-medium">
                     {llmResponse.llm_response || 'No response generated'}
                   </p>
                 </div>
-              </div>
+                
+                {/* Audio Playback Indicator */}
+                {currentAudio && (
+                  <div className="mt-4 flex items-center gap-2 text-purple-600 dark:text-purple-400 text-sm">
+                    <SpeakerWaveIcon className="h-4 w-4 animate-pulse" />
+                    <span>Audio playing... Use stop button to cancel</span>
+                  </div>
+                )}
+              </motion.div>
               
               {/* Pipeline Statistics */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">

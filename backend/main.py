@@ -406,44 +406,24 @@ async def voice_chat_pipeline(
         # Clean up extra whitespace
         filtered_response = re.sub(r'\s+', ' ', filtered_response.strip())
         
-        # NUCLEAR FILTER: Remove EVERYTHING that looks like XML or technical content
-        logger.info("💣 NUCLEAR FILTER: Scanning for any XML/technical content...")
+        # Light filtering: Only remove actual XML/HTML tags, preserve natural content
+        logger.info("🧹 Light filtering: Removing only XML tags, preserving natural content...")
         
-        # Split into sentences and find the FIRST sentence that sounds conversational
-        sentences = re.split(r'[.!?\n]+', filtered_response)
-        natural_sentences = []
-        
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if len(sentence) < 3:  # Skip very short fragments
-                continue
-                
-            # Skip sentences with ANY technical indicators
-            technical_indicators = ['xml', 'encoding', 'www.', 'http', 'version', 'doctype', 'xmlns', 'utf', 
-                                  'w3.org', 'schema', 'markup', '<?', '<!', '/>', 'namespace', 'declaration']
-            
-            if any(indicator in sentence.lower() for indicator in technical_indicators):
-                logger.info(f"🚫 Skipping technical sentence: '{sentence[:50]}...'")
-                continue
-                
-            # This looks like natural speech - keep it!
-            if any(word in sentence.lower() for word in ['i', 'you', 'hi', 'hello', 'how', 'what', 'sure', 'great', 'nice', 'help']):
-                natural_sentences.append(sentence)
-                logger.info(f"✅ Found natural sentence: '{sentence[:50]}...'")
-        
-        if natural_sentences:
-            # Take first 1-2 natural sentences
-            filtered_response = '. '.join(natural_sentences[:2]).strip()
-            if not filtered_response.endswith(('.', '!', '?')):
-                filtered_response += '.'
-            logger.info(f"🎉 NUCLEAR SUCCESS: '{filtered_response}'")
+        # Only remove actual XML content if present, but keep everything else
+        if any(marker in filtered_response.lower() for marker in ['<?xml', '<!doctype', '<html>', '</html>']):
+            logger.info("⚠️ Found XML content, applying stronger filtering")
+            # Keep the existing XML removal patterns but don't break natural content
+            pass
         else:
-            # ULTIMATE FALLBACK
-            filtered_response = "Hi there! I'm Ava, how can I help you today?"
-            logger.info("🚀 Used ultimate fallback response")
+            logger.info("✅ No XML detected, keeping full response intact")
         
-        # Update the response
-        llm_result["response"] = filtered_response
+        # Use the filtered response (but only if we actually filtered XML content)
+        if any(marker in raw_response.lower() for marker in ['<?xml', '<!doctype', '<html>', '</html>']):
+            llm_result["response"] = filtered_response
+            logger.info("🧹 Applied XML filtering to response")
+        else:
+            # Keep the original response intact for natural content
+            logger.info("✅ Keeping original response - no XML filtering needed")
         
         logger.info(f"🤖 Voice Chat LLM response (filtered): '{llm_result['response'][:100]}...'")
         
