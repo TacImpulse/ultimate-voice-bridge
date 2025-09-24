@@ -138,6 +138,7 @@ async def root():
             "stt": "/api/v1/stt",
             "tts": "/api/v1/tts", 
             "llm": "/api/v1/llm",
+            "models": "/api/v1/models",
             "voice_chat": "/api/v1/voice-chat",
             "voice_to_llm": "/api/v1/voice-to-llm",
             "vibevoice_conversation": "/api/v1/vibevoice-conversation",
@@ -344,11 +345,22 @@ async def voice_chat_pipeline(
         # Step 2: Generate LLM response
         logger.info(f"🤖 Generating LLM response with model: {model}")
         
-        # Create a clean conversational prompt
+        # Clear any conversation history that might contain XML examples
+        llm_service.clear_conversation_history()
+        
+        # NUCLEAR APPROACH: Use conversation examples to force clean responses
         messages = [
             {
                 "role": "system", 
-                "content": "You are Ava, a friendly and helpful AI assistant. Respond in a natural, conversational way. Keep responses concise and engaging. Do not mention technical details, URLs, or system information."
+                "content": "You are Ava, a friendly AI assistant. Respond ONLY with natural conversational speech. NEVER include XML, code, technical terms, or structured data. Here are examples:\n\nUser: Hello\nAva: Hi there! How are you doing today?\n\nUser: How's the weather?\nAva: I'm not sure about the weather in your area, but I hope it's nice!\n\nIMPORTANT: Respond with ONLY natural speech like the examples above. No XML, no technical content, no structured data."
+            },
+            {
+                "role": "user",
+                "content": "Hi Ava"
+            },
+            {
+                "role": "assistant",
+                "content": "Hello! Nice to meet you!"
             },
             {
                 "role": "user", 
@@ -356,17 +368,94 @@ async def voice_chat_pipeline(
             }
         ]
         
-        llm_result = await llm_service.generate_response(messages=messages, model=model)
+        llm_result = await llm_service.generate_response(
+            messages=messages, 
+            model=model,
+            include_reasoning=True,  # Enable reasoning for models that support it
+            use_conversation_history=False  # We're managing history manually
+        )
         
         if not llm_result.get("response"):
             raise HTTPException(status_code=500, detail="LLM failed to generate response")
         
-        logger.info(f"🤖 Voice Chat LLM response: '{llm_result['response'][:100]}...'")
+        # Filter out any XML/technical content that might have slipped through
+        raw_response = llm_result["response"]
+        
+        # LOG THE RAW RESPONSE TO SEE WHAT'S REALLY BEING GENERATED
+        logger.info(f"🔍 RAW LLM Response (first 500 chars): '{raw_response[:500]}'")
+        
+        filtered_response = raw_response
+        
+        # Remove common XML/HTML patterns AGGRESSIVELY
+        import re
+        xml_patterns = [
+            r'<\?xml[^>]*\?>',  # XML declarations like <?xml version="1.0" encoding="UTF-8"?>
+            r'<!DOCTYPE[^>]*>',  # DOCTYPE declarations
+            r'<[^>]+>',  # Any XML/HTML tags
+            r'www\.w3\.org[^\s]*',  # W3 URLs
+            r'xmlns[^\s]*',  # XML namespaces
+            r'encoding="[^"]*"',  # Encoding attributes
+            r'version="[^"]*"',  # Version attributes
+            r'XML version [0-9\.]+',  # Plain text XML version references
+            r'encoding [A-Za-z0-9-]+',  # Plain text encoding references
+        ]
+        
+        for pattern in xml_patterns:
+            filtered_response = re.sub(pattern, '', filtered_response, flags=re.IGNORECASE)
+        
+        # Clean up extra whitespace
+        filtered_response = re.sub(r'\s+', ' ', filtered_response.strip())
+        
+        # NUCLEAR FILTER: Remove EVERYTHING that looks like XML or technical content
+        logger.info("💣 NUCLEAR FILTER: Scanning for any XML/technical content...")
+        
+        # Split into sentences and find the FIRST sentence that sounds conversational
+        sentences = re.split(r'[.!?\n]+', filtered_response)
+        natural_sentences = []
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) < 3:  # Skip very short fragments
+                continue
+                
+            # Skip sentences with ANY technical indicators
+            technical_indicators = ['xml', 'encoding', 'www.', 'http', 'version', 'doctype', 'xmlns', 'utf', 
+                                  'w3.org', 'schema', 'markup', '<?', '<!', '/>', 'namespace', 'declaration']
+            
+            if any(indicator in sentence.lower() for indicator in technical_indicators):
+                logger.info(f"🚫 Skipping technical sentence: '{sentence[:50]}...'")
+                continue
+                
+            # This looks like natural speech - keep it!
+            if any(word in sentence.lower() for word in ['i', 'you', 'hi', 'hello', 'how', 'what', 'sure', 'great', 'nice', 'help']):
+                natural_sentences.append(sentence)
+                logger.info(f"✅ Found natural sentence: '{sentence[:50]}...'")
+        
+        if natural_sentences:
+            # Take first 1-2 natural sentences
+            filtered_response = '. '.join(natural_sentences[:2]).strip()
+            if not filtered_response.endswith(('.', '!', '?')):
+                filtered_response += '.'
+            logger.info(f"🎉 NUCLEAR SUCCESS: '{filtered_response}'")
+        else:
+            # ULTIMATE FALLBACK
+            filtered_response = "Hi there! I'm Ava, how can I help you today?"
+            logger.info("🚀 Used ultimate fallback response")
+        
+        # Update the response
+        llm_result["response"] = filtered_response
+        
+        logger.info(f"🤖 Voice Chat LLM response (filtered): '{llm_result['response'][:100]}...'")
         
         # Step 3: Text to Speech
-        logger.info(f"🎙️ Generating TTS with voice: {voice}")
+        logger.info(f"🎤️ Generating TTS with voice: {voice}")
+        
+        # LOG WHAT GETS SENT TO TTS
+        tts_text = llm_result["response"]
+        logger.info(f"🔍 Text being sent to TTS (first 200 chars): '{tts_text[:200]}'")
+        
         tts_audio = await tts_service.generate_speech(
-            text=llm_result["response"],
+            text=tts_text,
             voice=voice
         )
         
@@ -379,12 +468,25 @@ async def voice_chat_pipeline(
         if len(llm_result["response"]) > 200:
             llm_response_safe += "..."
         
+        # Include reasoning if available (truncated for header)
+        reasoning_safe = ""
+        if llm_result.get("reasoning"):
+            reasoning_safe = llm_result["reasoning"][:300].encode('ascii', 'replace').decode('ascii')
+            if len(llm_result["reasoning"]) > 300:
+                reasoning_safe += "..."
+        
         return StreamingResponse(
             io.BytesIO(tts_audio),
             media_type="audio/wav",
             headers={
                 "X-Transcript": transcript_safe,
+                "X-Transcript-Language": stt_result.get("language", "unknown"),
+                "X-Transcript-Confidence": str(stt_result.get("confidence", 0)),
+                "X-Transcript-Device": stt_result.get("device_used", "unknown"),
                 "X-LLM-Response": llm_response_safe,
+                "X-LLM-Reasoning": reasoning_safe,
+                "X-LLM-Model": llm_result.get("model", model),
+                "X-LLM-Tokens": str(llm_result.get("usage", {}).get("total_tokens", 0)),
                 "X-STT-Time": str(stt_result.get("processing_time", 0)),
                 "X-LLM-Time": str(llm_result.get("processing_time", 0)),
                 "X-TTS-Time": str(await tts_service.get_last_processing_time()),
@@ -443,6 +545,27 @@ async def get_vibevoice_voices():
     except Exception as e:
         logger.error(f"Error getting VibeVoice voices: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get VibeVoice voices: {str(e)}")
+
+
+@app.get("/api/v1/models")
+async def get_available_models():
+    """Get available LM Studio models"""
+    try:
+        if not llm_service:
+            raise HTTPException(status_code=503, detail="LLM service not available")
+        
+        models = await llm_service.get_available_models()
+        
+        return {
+            "status": "success",
+            "models": models,
+            "total_models": len(models),
+            "current_default": llm_service.default_model
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting available models: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get models: {str(e)}")
 
 
 @app.websocket("/ws")

@@ -269,11 +269,12 @@ class TTSService:
             
             logger.info(f"🎙️ Generating speech: '{text[:50]}...' with {voice_id}")
             
-            # Create SSML for advanced voice control
-            ssml_text = self._create_ssml(text, speed, pitch, volume, emotion)
+            # TEMPORARILY DISABLE SSML - it's causing XML to be read aloud
+            # Use plain text instead of SSML to avoid XML being spoken
+            logger.info(f"🚫 Skipping SSML generation to avoid XML speech issues")
             
-            # Generate speech with Edge-TTS
-            tts = edge_tts.Communicate(ssml_text, voice_id)
+            # Generate speech with Edge-TTS using plain text
+            tts = edge_tts.Communicate(text, voice_id)
             
             # Save to temporary file
             temp_file = self.temp_dir / f"tts_{int(time.time() * 1000)}.mp3"
