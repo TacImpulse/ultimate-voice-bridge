@@ -276,6 +276,9 @@ class TTSService:
             # Generate speech with Edge-TTS using plain text
             tts = edge_tts.Communicate(text, voice_id)
             
+            # Ensure temp directory exists
+            self.temp_dir.mkdir(parents=True, exist_ok=True)
+            
             # Save to temporary file
             temp_file = self.temp_dir / f"tts_{int(time.time() * 1000)}.mp3"
             await tts.save(str(temp_file))

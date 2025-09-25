@@ -48,12 +48,14 @@ export default function HomePage() {
             </p>
             <p>• Voice recording interface with real-time visualization</p>
             <p>• Whisper STT processing with RTX 5090 GPU acceleration</p>
+            <p>• Voice Clone Studio with waveform editing & file import</p>
+            <p>• VibeVoice-Large integration for custom voice cloning</p>
             <p style={{ marginTop: '15px', marginBottom: '15px' }}>
               <strong>🚧 Next Steps:</strong>
             </p>
             <p>• Integrate LM Studio for AI responses</p>
-            <p>• Add TTS voice synthesis</p>
-            <p>• Create full voice conversation pipeline</p>
+            <p>• Add TTS voice synthesis pipeline</p>
+            <p>• Create full voice conversation workflows</p>
           </div>
 
           <div style={{ marginTop: '40px' }}>
@@ -72,6 +74,23 @@ export default function HomePage() {
               }}
             >
               🎤 Try Voice Recording
+            </a>
+            
+            <a 
+              href="/voice-clone" 
+              style={{ 
+                display: 'inline-block',
+                backgroundColor: '#8b5cf6',
+                color: 'white',
+                padding: '15px 30px',
+                borderRadius: '8px',
+                textDecoration: 'none',
+                margin: '10px',
+                fontWeight: 'bold',
+                fontSize: '1.1rem'
+              }}
+            >
+              🎭 Voice Clone Studio
             </a>
           </div>
           

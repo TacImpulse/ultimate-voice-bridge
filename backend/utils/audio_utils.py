@@ -17,19 +17,44 @@ MAX_AUDIO_SIZE = 50 * 1024 * 1024  # 50MB max file size
 
 
 def validate_audio_file(file: UploadFile) -> bool:
-    """Validate uploaded audio file"""
+    """Validate uploaded audio file with flexible content type checking"""
     try:
-        # Check content type
-        if file.content_type and not file.content_type.startswith('audio/'):
-            logger.warning(f"Invalid content type: {file.content_type}")
-            return False
+        # More flexible content type checking
+        valid_content_types = {
+            'audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/flac', 'audio/ogg', 
+            'audio/webm', 'audio/mp4', 'audio/x-wav', 'audio/x-flac', 'audio/x-ms-wma',
+            'application/octet-stream',  # Common fallback for binary files
+            None  # Allow files without content type
+        }
         
-        # Check file extension
+        if file.content_type and file.content_type not in valid_content_types:
+            # Log but don't reject - try to validate by extension instead
+            logger.info(f"Unknown content type '{file.content_type}', checking file extension...")
+        
+        # Check file extension (primary validation)
+        has_valid_extension = False
         if file.filename:
             file_extension = '.' + file.filename.split('.')[-1].lower()
-            if file_extension not in SUPPORTED_FORMATS:
+            if file_extension in SUPPORTED_FORMATS:
+                has_valid_extension = True
+                logger.info(f"Valid audio file extension: {file_extension}")
+            else:
                 logger.warning(f"Unsupported format: {file_extension}")
-                return False
+        
+        # For browser recordings without proper filename/extension, be more lenient
+        if not has_valid_extension:
+            # If content type suggests audio, allow it
+            if file.content_type and file.content_type.startswith('audio/'):
+                logger.info(f"Allowing audio based on content type: {file.content_type}")
+                has_valid_extension = True
+            # If it's a generic binary file, allow it and let pydub handle it
+            elif file.content_type == 'application/octet-stream' or not file.content_type:
+                logger.info("Allowing binary/unknown file type - will validate with pydub")
+                has_valid_extension = True
+        
+        if not has_valid_extension:
+            logger.warning(f"Rejected file: filename='{file.filename}', content_type='{file.content_type}'")
+            return False
         
         # Check file size (if available)
         if hasattr(file.file, 'seek') and hasattr(file.file, 'tell'):
@@ -41,7 +66,12 @@ def validate_audio_file(file: UploadFile) -> bool:
             if file_size > MAX_AUDIO_SIZE:
                 logger.warning(f"File too large: {file_size} bytes")
                 return False
+            
+            if file_size < 1000:  # Less than 1KB is suspicious
+                logger.warning(f"File too small: {file_size} bytes")
+                return False
         
+        logger.info(f"Audio file validation passed: {file.filename} ({file.content_type})")
         return True
         
     except Exception as e:

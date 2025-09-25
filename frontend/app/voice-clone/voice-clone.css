@@ -1,0 +1,200 @@
+/* Voice Clone Studio Custom Styles */
+
+/* Range Slider Styling */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.slider::-webkit-slider-track {
+  background: #e5e7eb;
+  height: 12px;
+  border-radius: 6px;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 24px;
+  width: 24px;
+  border-radius: 50%;
+  background: #8b5cf6;
+  cursor: pointer;
+  border: 3px solid #ffffff;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+  position: relative;
+  top: -6px;
+}
+
+.slider::-webkit-slider-thumb:hover {
+  background: #7c3aed;
+  transform: scale(1.1);
+  transition: all 0.2s ease;
+}
+
+.slider::-moz-range-track {
+  background: #e5e7eb;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.slider::-moz-range-thumb {
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  background: #8b5cf6;
+  cursor: pointer;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.slider::-moz-range-thumb:hover {
+  background: #7c3aed;
+  transform: scale(1.1);
+  transition: all 0.2s ease;
+}
+
+/* Dark mode slider styles */
+.dark .slider::-webkit-slider-track {
+  background: #374151;
+}
+
+.dark .slider::-moz-range-track {
+  background: #374151;
+}
+
+/* Waveform canvas hover effects */
+canvas.waveform-canvas {
+  transition: all 0.2s ease;
+}
+
+canvas.waveform-canvas:hover {
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+/* File drop zone animations */
+.file-drop-zone {
+  transition: all 0.3s ease;
+}
+
+.file-drop-zone.drag-over {
+  transform: scale(1.02);
+  box-shadow: 0 8px 25px rgba(139, 92, 246, 0.2);
+}
+
+/* Progress bar for file processing */
+.processing-bar {
+  background: linear-gradient(90deg, 
+    #8b5cf6 0%, 
+    #06b6d4 50%, 
+    #8b5cf6 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Pulse animation for recording indicator */
+.recording-pulse {
+  animation: pulse-red 1.5s infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+}
+
+/* Waveform selection highlights */
+.waveform-selection {
+  background: linear-gradient(90deg, 
+    rgba(16, 185, 129, 0.3) 0%, 
+    rgba(16, 185, 129, 0.1) 100%);
+  border: 2px solid #10b981;
+  border-radius: 4px;
+}
+
+/* Custom scrollbar for file list */
+.voice-samples-list {
+  scrollbar-width: thin;
+  scrollbar-color: #8b5cf6 #e5e7eb;
+}
+
+.voice-samples-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.voice-samples-list::-webkit-scrollbar-track {
+  background: #e5e7eb;
+  border-radius: 3px;
+}
+
+.voice-samples-list::-webkit-scrollbar-thumb {
+  background: #8b5cf6;
+  border-radius: 3px;
+}
+
+.voice-samples-list::-webkit-scrollbar-thumb:hover {
+  background: #7c3aed;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .waveform-canvas {
+    height: 80px !important;
+  }
+  
+  .trim-controls {
+    flex-direction: column;
+  }
+  
+  .trim-controls .button-group {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* Audio quality indicators */
+.quality-excellent {
+  color: #059669;
+  background-color: #d1fae5;
+  border-color: #059669;
+}
+
+.quality-good {
+  color: #d97706;
+  background-color: #fef3c7;
+  border-color: #d97706;
+}
+
+.quality-fair {
+  color: #dc2626;
+  background-color: #fee2e2;
+  border-color: #dc2626;
+}
+
+.dark .quality-excellent {
+  background-color: rgba(5, 150, 105, 0.2);
+}
+
+.dark .quality-good {
+  background-color: rgba(217, 119, 6, 0.2);
+}
+
+.dark .quality-fair {
+  background-color: rgba(220, 38, 38, 0.2);
+}

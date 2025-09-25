@@ -85,7 +85,7 @@ class LLMService:
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 500,
+        max_tokens: int = 2000,
         include_reasoning: bool = True,
         use_conversation_history: bool = True
     ) -> Dict[str, Any]:
@@ -205,7 +205,7 @@ class LLMService:
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 500
+        max_tokens: int = 2000
     ):
         """
         Generate streaming LLM response (async generator)

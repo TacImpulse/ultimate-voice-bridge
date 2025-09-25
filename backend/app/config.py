@@ -5,7 +5,7 @@ Application configuration using Pydantic Settings
 import os
 from typing import List, Optional
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 
 
 class Settings(BaseSettings):
@@ -73,6 +73,48 @@ class Settings(BaseSettings):
     rate_limit_requests_per_minute: int = Field(default=60, env="RATE_LIMIT_REQUESTS_PER_MINUTE")
     rate_limit_concurrent_sessions: int = Field(default=10, env="RATE_LIMIT_CONCURRENT_SESSIONS")
     
+    # RTX 5090 GPU Acceleration Configuration
+    gpu_acceleration_enabled: bool = Field(default=True, env="GPU_ACCELERATION_ENABLED")
+    gpu_device_id: int = Field(default=0, env="GPU_DEVICE_ID")
+    gpu_memory_fraction: float = Field(default=0.8, env="GPU_MEMORY_FRACTION")  # Use 80% of GPU memory
+    gpu_allow_growth: bool = Field(default=True, env="GPU_ALLOW_GROWTH")
+    
+    # ONNX Runtime Configuration
+    onnx_optimization_level: str = Field(default="all", env="ONNX_OPTIMIZATION_LEVEL")  # Options: disable, basic, extended, all
+    onnx_intra_op_num_threads: int = Field(default=0, env="ONNX_INTRA_OP_NUM_THREADS")  # 0 = auto-detect
+    onnx_inter_op_num_threads: int = Field(default=0, env="ONNX_INTER_OP_NUM_THREADS")  # 0 = auto-detect
+    onnx_enable_profiling: bool = Field(default=False, env="ONNX_ENABLE_PROFILING")
+    
+    # Model Caching Configuration
+    onnx_model_cache_dir: str = Field(default="./models/onnx_cache", env="ONNX_MODEL_CACHE_DIR")
+    onnx_model_cache_size_mb: int = Field(default=2048, env="ONNX_MODEL_CACHE_SIZE_MB")  # 2GB cache
+    
+    # Batch Processing Configuration
+    default_batch_size: int = Field(default=16, env="DEFAULT_BATCH_SIZE")  # Optimized for RTX 5090
+    max_batch_size: int = Field(default=64, env="MAX_BATCH_SIZE")
+    batch_timeout_ms: int = Field(default=100, env="BATCH_TIMEOUT_MS")  # Max wait time for batch formation
+    
+    # Performance Monitoring
+    enable_gpu_monitoring: bool = Field(default=True, env="ENABLE_GPU_MONITORING")
+    performance_logging: bool = Field(default=True, env="PERFORMANCE_LOGGING")
+    benchmark_mode: bool = Field(default=False, env="BENCHMARK_MODE")
+    
+    @field_validator('gpu_acceleration_enabled', 'gpu_allow_growth', 'onnx_enable_profiling', 
+                     'enable_gpu_monitoring', 'performance_logging', 'benchmark_mode',
+                     'debug', 'reload', 'enable_voice_cloning', 'enable_performance_logging',
+                     'enable_real_time_stt', 'enable_streaming_tts', 'enable_voice_activity_detection',
+                     'enable_noise_reduction', mode='before')
+    @classmethod
+    def validate_booleans(cls, v):
+        """Strip whitespace from boolean environment variables"""
+        if isinstance(v, str):
+            v = v.strip()
+            if v.lower() in ('true', '1', 'on', 'yes'):
+                return True
+            elif v.lower() in ('false', '0', 'off', 'no', ''):
+                return False
+        return v
+
     class Config:
         env_file = ".env"
         case_sensitive = False

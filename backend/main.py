@@ -22,6 +22,15 @@ from app.websocket_manager import WebSocketManager
 from services.stt_service import STTService
 from services.tts_service import TTSService
 from services.llm_service import LLMService
+from services.vibevoice_service import VibeVoiceService
+
+# RTX 5090 GPU Acceleration imports
+try:
+    from services.onnx_acceleration_service import ONNXAccelerationService
+    from utils.onnx_converter import ONNXConverter
+    GPU_ACCELERATION_AVAILABLE = True
+except ImportError:
+    GPU_ACCELERATION_AVAILABLE = False
 from models.voice_models import (
     TranscriptionRequest, 
     TranscriptionResponse,
@@ -30,7 +39,12 @@ from models.voice_models import (
     LLMRequest,
     LLMResponse,
     VoiceMessage,
-    HealthResponse
+    HealthResponse,
+    VoiceCloneRequest,
+    VoiceCloneResponse,
+    VoiceCloneTestRequest,
+    VoiceCloneTestResponse,
+    VoiceCloneListResponse
 )
 
 # VibeVoice conversation request model
@@ -55,6 +69,8 @@ settings = Settings()
 stt_service: STTService = None
 tts_service: TTSService = None
 llm_service: LLMService = None
+vibevoice_service: VibeVoiceService = None
+onnx_acceleration_service: ONNXAccelerationService = None
 websocket_manager = WebSocketManager()
 
 
@@ -64,7 +80,7 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting Ultimate Voice Bridge...")
     
-    global stt_service, tts_service, llm_service
+    global stt_service, tts_service, llm_service, vibevoice_service, onnx_acceleration_service
     
     # Initialize services
     try:
@@ -80,7 +96,50 @@ async def lifespan(app: FastAPI):
         await llm_service.initialize()
         logger.info("✅ LLM Service initialized")
         
-        logger.info("🎙️ Ultimate Voice Bridge is ready!")
+        # Initialize RTX 5090 GPU Acceleration (if available)
+        if GPU_ACCELERATION_AVAILABLE and settings.gpu_acceleration_enabled:
+            logger.info("🚀 Initializing RTX 5090 GPU Acceleration...")
+            try:
+                onnx_acceleration_service = ONNXAccelerationService()
+                await onnx_acceleration_service.initialize()
+                logger.info("✅ RTX 5090 GPU Acceleration initialized successfully!")
+                
+                # Initialize VibeVoice with GPU acceleration
+                vibevoice_service = VibeVoiceService()
+                await vibevoice_service.initialize()
+                logger.info("✅ VibeVoice with GPU Acceleration initialized")
+                
+                # Log GPU info
+                if onnx_acceleration_service.device_info:
+                    gpu_name = onnx_acceleration_service.device_info.get('gpu_name', 'Unknown')
+                    cuda_available = onnx_acceleration_service.device_info.get('cuda_available', False)
+                    logger.info(f"🎮 GPU: {gpu_name} (CUDA: {cuda_available})")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ RTX 5090 GPU acceleration initialization failed: {e}")
+                logger.info("🚑 Falling back to CPU-only operation")
+                onnx_acceleration_service = None
+                vibevoice_service = None
+        else:
+            if not GPU_ACCELERATION_AVAILABLE:
+                logger.info("💻 GPU acceleration libraries not available - running CPU-only")
+            else:
+                logger.info("💻 GPU acceleration disabled in settings - running CPU-only")
+        
+        logger.info("🎤️ Ultimate Voice Bridge is ready!")
+        
+        # Display startup summary
+        startup_summary = [
+            f"STT Service: {'✅' if stt_service else '❌'}",
+            f"TTS Service: {'✅' if tts_service else '❌'}",
+            f"LLM Service: {'✅' if llm_service else '❌'}",
+            f"GPU Acceleration: {'🚀 RTX 5090' if onnx_acceleration_service else '💻 CPU Only'}",
+            f"VibeVoice GPU: {'✅' if vibevoice_service else '❌'}"
+        ]
+        
+        logger.info("🎯 Service Status Summary:")
+        for status in startup_summary:
+            logger.info(f"   {status}")
         
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {e}")
@@ -97,6 +156,14 @@ async def lifespan(app: FastAPI):
         await tts_service.cleanup()
     if llm_service:
         await llm_service.cleanup()
+    
+    # Cleanup RTX 5090 GPU Acceleration services
+    if vibevoice_service:
+        await vibevoice_service.cleanup()
+        logger.info("✅ VibeVoice GPU service cleaned up")
+    if onnx_acceleration_service:
+        await onnx_acceleration_service.cleanup()
+        logger.info("✅ RTX 5090 GPU acceleration service cleaned up")
     
     logger.info("👋 Ultimate Voice Bridge shutdown complete")
 
@@ -143,6 +210,9 @@ async def root():
             "voice_to_llm": "/api/v1/voice-to-llm",
             "vibevoice_conversation": "/api/v1/vibevoice-conversation",
             "vibevoice_voices": "/api/v1/vibevoice-voices",
+            "voice_clone": "/api/v1/voice-clone",
+            "voice_clone_test": "/api/v1/voice-clone/test",
+            "voice_clones_list": "/api/v1/voice-clones",
             "websocket": "/ws",
             "docs": "/docs"
         },
@@ -159,6 +229,23 @@ async def health_check():
         tts_healthy = await tts_service.health_check() if tts_service else False
         llm_healthy = await llm_service.health_check() if llm_service else False
         
+        # Check GPU acceleration health
+        gpu_acceleration_healthy = True
+        vibevoice_gpu_healthy = True
+        
+        if onnx_acceleration_service:
+            try:
+                gpu_metrics = await onnx_acceleration_service.get_performance_metrics()
+                gpu_acceleration_healthy = gpu_metrics.get('status') == 'healthy'
+            except:
+                gpu_acceleration_healthy = False
+        
+        if vibevoice_service:
+            try:
+                vibevoice_gpu_healthy = await vibevoice_service.health_check()
+            except:
+                vibevoice_gpu_healthy = False
+        
         overall_healthy = stt_healthy and tts_healthy and llm_healthy
         
         return HealthResponse(
@@ -167,7 +254,9 @@ async def health_check():
             services={
                 "stt": "healthy" if stt_healthy else "unhealthy",
                 "tts": "healthy" if tts_healthy else "unhealthy", 
-                "llm": "healthy" if llm_healthy else "unhealthy"
+                "llm": "healthy" if llm_healthy else "unhealthy",
+                "gpu_acceleration": "healthy" if gpu_acceleration_healthy else "unavailable",
+                "vibevoice_gpu": "healthy" if vibevoice_gpu_healthy else "unavailable"
             },
             version="1.0.0"
         )
@@ -260,7 +349,7 @@ async def voice_to_llm_pipeline(
     model: str = Form("bytedance/seed-oss-36b", description="LLM model to use"),
     language: str = Form("auto", description="STT language"),
     temperature: float = Form(0.7, description="LLM temperature"),
-    max_tokens: int = Form(500, description="Maximum tokens for LLM response"),
+    max_tokens: int = Form(2000, description="Maximum tokens for LLM response"),
     include_reasoning: bool = Form(True, description="Include reasoning for reasoning models"),
     use_conversation_history: bool = Form(True, description="Use conversation context")
 ):
@@ -735,6 +824,141 @@ async def get_available_models():
     except Exception as e:
         logger.error(f"Error getting available models: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get models: {str(e)}")
+
+
+@app.post("/api/v1/voice-clone", response_model=VoiceCloneResponse)
+async def create_voice_clone(
+    name: str = Form(..., description="Voice clone name"),
+    transcript: str = Form(..., description="Transcript for the voice sample"),
+    audio: UploadFile = File(..., description="Voice sample audio file"),
+    description: str = Form(None, description="Optional description of the voice")
+):
+    """Create a new voice clone from uploaded audio and transcript"""
+    try:
+        logger.info(f"🎤 Voice clone request: name='{name}', filename='{audio.filename}', content_type='{audio.content_type}', size={audio.size if hasattr(audio, 'size') else 'unknown'}")
+        
+        if not tts_service or not tts_service.vibevoice_service:
+            logger.error("VibeVoice service not available")
+            raise HTTPException(status_code=503, detail="VibeVoice service not available")
+        
+        # Detailed audio file validation with logging
+        logger.info(f"🔍 Validating audio file: {audio.filename} ({audio.content_type})")
+        if not validate_audio_file(audio):
+            logger.error(f"❌ Audio validation failed for: {audio.filename} ({audio.content_type})")
+            raise HTTPException(status_code=400, detail="Invalid audio file format")
+        
+        logger.info("✅ Audio validation passed")
+        
+        # Read audio data
+        audio_data = await audio.read()
+        logger.info(f"📁 Read {len(audio_data)} bytes of audio data")
+        
+        # Try to get audio info for debugging
+        try:
+            from utils.audio_utils import get_audio_info
+            audio_info = get_audio_info(audio_data)
+            logger.info(f"🎵 Audio info: {audio_info}")
+        except Exception as info_error:
+            logger.warning(f"Could not get audio info: {info_error}")
+        
+        logger.info(f"🎤 Creating voice clone '{name}' with transcript: '{transcript[:50]}...'")
+        
+        # Create voice clone using VibeVoice service
+        result = await tts_service.vibevoice_service.create_voice_clone(
+            name=name,
+            transcript=transcript,
+            audio_data=audio_data,
+            description=description
+        )
+        
+        logger.info(f"✅ Voice clone created successfully: {result}")
+        return VoiceCloneResponse(**result)
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        logger.error(f"❌ Voice clone creation error: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Voice clone creation failed: {str(e)}")
+
+
+@app.post("/api/v1/voice-clone/test")
+async def test_voice_clone(
+    voice_id: str = Form(..., description="Voice clone ID to test"),
+    text: str = Form(..., description="Text to synthesize with the cloned voice")
+):
+    """Test a voice clone by generating speech"""
+    try:
+        if not tts_service or not tts_service.vibevoice_service:
+            raise HTTPException(status_code=503, detail="VibeVoice service not available")
+        
+        logger.info(f"🎤 Testing voice clone '{voice_id}' with text: '{text[:50]}...'")
+        
+        # Test voice clone using VibeVoice service
+        try:
+            audio_data = await tts_service.vibevoice_service.test_voice_clone(
+                voice_id=voice_id,
+                text=text
+            )
+        except Exception as e:
+            # Fallback: if clone not found, try to reconcile with available clones
+            if "not found" in str(e).lower():
+                try:
+                    clones = await tts_service.vibevoice_service.get_voice_clones()
+                    candidate_id = None
+                    if clones:
+                        ids = [c.get("voice_id") for c in clones]
+                        if voice_id not in ids and len(clones) == 1:
+                            candidate_id = clones[0].get("voice_id")
+                    if candidate_id:
+                        logger.warning(f"Voice clone '{voice_id}' not found. Retrying with available voice clone '{candidate_id}'.")
+                        audio_data = await tts_service.vibevoice_service.test_voice_clone(
+                            voice_id=candidate_id,
+                            text=text
+                        )
+                    else:
+                        raise
+                except Exception:
+                    raise
+            else:
+                raise
+        
+        # Return audio as streaming response
+        return StreamingResponse(
+            io.BytesIO(audio_data),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f"inline; filename=voice_clone_{voice_id}_test.wav",
+                "X-Voice-Clone-ID": voice_id,
+                "X-Test-Text": text[:100],  # Truncate for header
+                "Access-Control-Expose-Headers": "X-Voice-Clone-ID,X-Test-Text"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Voice clone test error: {e}")
+        raise HTTPException(status_code=500, detail=f"Voice clone test failed: {str(e)}")
+
+
+@app.get("/api/v1/voice-clones", response_model=VoiceCloneListResponse)
+async def list_voice_clones():
+    """Get list of available voice clones"""
+    try:
+        if not tts_service or not tts_service.vibevoice_service:
+            raise HTTPException(status_code=503, detail="VibeVoice service not available")
+        
+        voice_clones = await tts_service.vibevoice_service.get_voice_clones()
+        
+        return VoiceCloneListResponse(
+            status="success",
+            voice_clones=voice_clones,
+            total_count=len(voice_clones)
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting voice clones: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get voice clones: {str(e)}")
 
 
 @app.websocket("/ws")

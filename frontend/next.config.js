@@ -19,6 +19,13 @@ const nextConfig = {
           '**/node_modules/**',
           '**/.git/**',
           '**/.next/**',
+          // Windows system files - be very specific about C: drive
+          'C:/pagefile.sys',
+          'C:/hiberfil.sys', 
+          'C:/swapfile.sys',
+          'C:\\pagefile.sys',
+          'C:\\hiberfil.sys',
+          'C:\\swapfile.sys',
           '**/pagefile.sys',
           '**/hiberfil.sys',
           '**/swapfile.sys',

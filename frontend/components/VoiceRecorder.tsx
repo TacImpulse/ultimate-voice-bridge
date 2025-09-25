@@ -158,10 +158,52 @@ export default function VoiceRecorder() {
       console.log('📁 Including files:', uploadedFiles.map(f => f.name))
       console.log('🎯 Primary file index:', primaryFileIndex)
       
+      // 🔍 CRITICAL DEBUG INFO for file upload issue
+      console.log('🚨 DETAILED FILE DEBUG:')
+      uploadedFiles.forEach((file, index) => {
+        console.log(`File ${index}:`, {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          lastModified: new Date(file.lastModified).toISOString(),
+          isPrimary: index === primaryFileIndex
+        })
+        
+        // For images, show first few bytes as hex for fingerprinting
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader()
+          reader.onload = (e) => {
+            const arrayBuffer = e.target?.result as ArrayBuffer
+            if (arrayBuffer) {
+              const bytes = new Uint8Array(arrayBuffer.slice(0, 20))
+              const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ')
+              console.log(`🖼️ Image ${index} (${file.name}) fingerprint:`, hex)
+            }
+          }
+          reader.readAsArrayBuffer(file.slice(0, 20))
+        }
+      })
+      
       // Create FormData for multimodal support
       const formData = new FormData()
-      formData.append('text_input', textInput)
+      
+      // If we have image files but no text input, provide a better default prompt
+      let processedTextInput = textInput
+      if (!textInput.trim() && uploadedFiles.length > 0) {
+        const imageFiles = uploadedFiles.filter(f => f.type.startsWith('image/'))
+        if (imageFiles.length > 0) {
+          processedTextInput = "Please describe what you see in this image in a natural, conversational way. Focus on the main subject and interesting details, but keep it concise and engaging."
+        }
+      }
+      
+      formData.append('text_input', processedTextInput)
       formData.append('selected_model', selectedModel)
+      
+      // Add response style preference for images
+      if (uploadedFiles.some(f => f.type.startsWith('image/'))) {
+        formData.append('response_style', 'conversational_description')
+        formData.append('avoid_metadata', 'true')
+      }
       
       // Add primary file index if specified
       if (primaryFileIndex !== null) {
@@ -169,15 +211,27 @@ export default function VoiceRecorder() {
       }
       
       // Add all uploaded files with metadata
+      console.log('📦 BUILDING FORMDATA:')
       uploadedFiles.forEach((file, index) => {
+        console.log(`🖼️ Adding file ${index}:`, {
+          name: file.name,
+          type: file.type, 
+          size: file.size,
+          isPrimary: index === primaryFileIndex
+        })
+        
         formData.append(`file_${index}`, file)
         formData.append(`file_${index}_name`, file.name)
         formData.append(`file_${index}_type`, file.type)
+        formData.append(`file_${index}_size`, file.size.toString())
+        formData.append(`file_${index}_last_modified`, file.lastModified.toString())
         formData.append(`file_${index}_is_primary`, (index === primaryFileIndex).toString())
       })
       
       // Add total file count
       formData.append('total_files', uploadedFiles.length.toString())
+      
+      console.log('🚀 FormData ready with', uploadedFiles.length, 'files. Primary index:', primaryFileIndex)
       
       setProcessingStatus(`Sending request with ${uploadedFiles.length} files...`)
       setConnectionStatus('connecting')
@@ -189,7 +243,28 @@ export default function VoiceRecorder() {
       })
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        // Get detailed error info from backend
+        let errorDetails = `HTTP ${response.status}: ${response.statusText}`
+        try {
+          const errorText = await response.text()
+          if (errorText) {
+            console.error('🚨 Backend Error Details:', errorText)
+            errorDetails += ` - ${errorText.substring(0, 200)}`
+          }
+        } catch (e) {
+          console.error('🚨 Could not read error details:', e)
+        }
+        
+        // Special handling for image processing errors
+        if (response.status === 500 && uploadedFiles.some(f => f.type.startsWith('image/'))) {
+          errorDetails += '\n\nThis might be an image processing issue. Check if:';
+          errorDetails += '\n- The image file is corrupted or in an unsupported format'
+          errorDetails += '\n- The backend has enough memory to process large images'
+          errorDetails += '\n- The multimodal LLM is properly configured'
+          errorDetails += `\n- Image size: ${uploadedFiles.find(f => f.type.startsWith('image/'))?.size} bytes`
+        }
+        
+        throw new Error(errorDetails)
       }
       
       // Get all the enhanced metadata from headers (same as voice processing)
@@ -357,7 +432,7 @@ export default function VoiceRecorder() {
     }
   }
 
-  // Replay TTS for any given text
+  // Replay TTS for any given text with full professional audio controls
   const replayTTS = async (text: string, buttonId?: string) => {
     if (!text || !text.trim()) {
       console.log('No text to replay')
@@ -366,6 +441,16 @@ export default function VoiceRecorder() {
 
     try {
       console.log('🔊 Replaying TTS for text:', text.substring(0, 50) + '...')
+      
+      // Stop any currently playing audio first
+      if (currentAudio) {
+        currentAudio.pause()
+        currentAudio.currentTime = 0
+        setCurrentAudio(null)
+        setIsAudioPlaying(false)
+        setAudioProgress(0)
+        setAudioDuration(0)
+      }
       
       // Disable the button temporarily
       if (buttonId) {
@@ -394,12 +479,38 @@ export default function VoiceRecorder() {
       const audioUrl = URL.createObjectURL(audioBlob)
       const audio = new Audio(audioUrl)
       
+      // Set as current audio with full professional controls
+      setCurrentAudio(audio)
+      
       audio.onloadeddata = () => {
+        console.log('🎵 TTS replay audio loaded, playing...')
+        setAudioDuration(audio.duration || 0)
+        setIsAudioPlaying(true)
+        audio.volume = audioVolume
+        audio.playbackRate = audioSpeed
         audio.play().catch(e => console.error('TTS replay error:', e))
       }
       
+      audio.onplay = () => {
+        setIsAudioPlaying(true)
+      }
+      
+      audio.onpause = () => {
+        setIsAudioPlaying(false)
+      }
+      
+      audio.ontimeupdate = () => {
+        setAudioProgress(audio.currentTime || 0)
+      }
+      
       audio.onended = () => {
+        console.log('🎵 TTS replay audio playback finished')
+        setCurrentAudio(null)
+        setIsAudioPlaying(false)
+        setAudioProgress(0)
+        setAudioDuration(0)
         URL.revokeObjectURL(audioUrl)
+        
         // Re-enable button
         if (buttonId) {
           const button = document.getElementById(buttonId) as HTMLButtonElement
@@ -410,8 +521,13 @@ export default function VoiceRecorder() {
         }
       }
       
-      audio.onerror = () => {
-        console.error('Audio playback error')
+      audio.onerror = (e) => {
+        console.error('🚨 TTS replay audio playback error:', e)
+        setCurrentAudio(null)
+        setIsAudioPlaying(false)
+        setAudioProgress(0)
+        setAudioDuration(0)
+        
         // Re-enable button
         if (buttonId) {
           const button = document.getElementById(buttonId) as HTMLButtonElement
@@ -1394,13 +1510,6 @@ export default function VoiceRecorder() {
     }
   }
 
-  // Format time display
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -1569,7 +1678,10 @@ export default function VoiceRecorder() {
                         processTextInput()
                       }
                     }}
-                    placeholder="Type, paste, or use the 🎤 button to add speech-to-text. Use Ctrl+Enter to process with AI."
+                    placeholder={uploadedFiles.some(f => f.type.startsWith('image/')) 
+                      ? "Optional: Add custom instructions for image analysis (e.g., 'Describe the cat', 'What colors do you see?', 'Is this funny?'). Leave blank for natural description."
+                      : "Type, paste, or use the 🎤 button to add speech-to-text. Use Ctrl+Enter to process with AI."
+                    }
                     rows={4}
                     className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900 dark:text-gray-100"
                   />
@@ -1609,9 +1721,18 @@ export default function VoiceRecorder() {
               
               {/* File Upload Area */}
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  📁 Multimodal Files (Images, Documents, Audio, Video):
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    📁 Multimodal Files (Images, Documents, Audio, Video):
+                  </label>
+                  
+                  {/* Warning about file mix-up issue */}
+                  {uploadedFiles.some(f => f.type.startsWith('image/')) && (
+                    <div className="text-xs bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 px-2 py-1 rounded border border-amber-200 dark:border-amber-800">
+                      ⚠️ If AI describes wrong image, check console for debug info
+                    </div>
+                  )}
+                </div>
                 
                 {/* Drag and Drop Zone */}
                 <div
@@ -1753,6 +1874,20 @@ export default function VoiceRecorder() {
                 {uploadedFiles.length > 0 && `${textInput.length > 0 ? ' • ' : ''}${uploadedFiles.length} files attached`}
                 {textInput.length === 0 && uploadedFiles.length === 0 && 'Add text or files to process'}
                 {uploadedFiles.length > 0 && ' • Files can be processed without text!'}
+                
+                {/* Show current files being processed */}
+                {uploadedFiles.length > 0 && (
+                  <div className="mt-1 text-xs">
+                    🖼️ Files: {uploadedFiles.map((f, i) => 
+                      `${i === primaryFileIndex ? '★' : ''} ${f.name}`
+                    ).join(', ')}
+                    {primaryFileIndex !== null && (
+                      <span className="text-purple-600 dark:text-purple-400 ml-2">
+                        (★ = Primary file)
+                      </span>
+                    )}
+                  </div>
+                )}
                 {/* Status indicators */}
                 {processingStatus && (
                   <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
@@ -2192,18 +2327,50 @@ export default function VoiceRecorder() {
                 </div>
                 
                 <div className="bg-white dark:bg-gray-800 p-5 rounded-lg border-2 border-purple-200 dark:border-purple-700 shadow-inner">
-                  <div className="flex items-start justify-between gap-4">
-                    <p className="text-gray-900 dark:text-gray-100 text-lg leading-relaxed whitespace-pre-wrap font-medium flex-1">
+                  <div className="flex items-start justify-between gap-4 mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-purple-600 dark:text-purple-400 text-sm font-medium">🤖 AI Response
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        ({(llmResponse.llm_response || '').length} characters)
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          if (llmResponse.llm_response) {
+                            navigator.clipboard.writeText(llmResponse.llm_response)
+                          }
+                        }}
+                        className="px-2 py-1 bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 text-xs rounded transition-colors"
+                        title="Copy response to clipboard"
+                      >
+                        📋 Copy
+                      </button>
+                      <button
+                        id="current-response-replay"
+                        onClick={() => replayTTS(llmResponse.llm_response || '', 'current-response-replay')}
+                        className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors flex items-center gap-1 flex-shrink-0"
+                        title="Read this response aloud"
+                      >
+                        🔊 Read Aloud
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Scrollable Response Text */}
+                  <div 
+                    className="min-h-32 max-h-96 overflow-y-auto bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-600 custom-scrollbar"
+                    style={{ 
+                      scrollbarWidth: 'thin',
+                      height: 'auto',
+                      minHeight: '8rem',
+                      maxHeight: '24rem'
+                    }}
+                  >
+                    <p className="text-gray-900 dark:text-gray-100 text-base leading-relaxed whitespace-pre-wrap font-normal break-words">
                       {llmResponse.llm_response || 'No response generated'}
                     </p>
-                    <button
-                      id="current-response-replay"
-                      onClick={() => replayTTS(llmResponse.llm_response || '', 'current-response-replay')}
-                      className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors flex items-center gap-1 flex-shrink-0"
-                      title="Read this response aloud"
-                    >
-                      🔊 Read Aloud
-                    </button>
                   </div>
                 </div>
                 
