@@ -10,7 +10,7 @@ def setup_cuda_environment():
     """Setup CUDA environment variables for optimal VibeVoice performance"""
     
     # CUDA paths
-    cuda_home = "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.8"
+    cuda_home = "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.0"
     cuda_bin = os.path.join(cuda_home, "bin")
     cuda_lib = os.path.join(cuda_home, "lib", "x64")
     cuda_include = os.path.join(cuda_home, "include")

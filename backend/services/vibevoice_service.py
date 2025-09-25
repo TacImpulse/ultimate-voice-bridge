@@ -404,7 +404,14 @@ class VibeVoiceService:
                 attn_impl = "sdpa"
             elif self.device == "cuda":
                 load_dtype = torch.bfloat16
-                attn_impl = "flash_attention_2"
+                # Try flash_attention_2 first, fallback to sdpa if not available
+                try:
+                    import flash_attn
+                    attn_impl = "flash_attention_2"
+                    logger.info("✅ Using Flash Attention 2 for acceleration")
+                except ImportError:
+                    attn_impl = "sdpa"
+                    logger.info("ℹ️ Flash Attention not available, using SDPA (Scaled Dot Product Attention)")
             else:
                 load_dtype = torch.float32
                 attn_impl = "sdpa"
@@ -456,11 +463,30 @@ class VibeVoiceService:
             
             # Convert to audio bytes
             if outputs.speech_outputs and outputs.speech_outputs[0] is not None:
-                audio_array = outputs.speech_outputs[0].cpu().numpy()
+                # Convert BFloat16 to float32 for numpy compatibility
+                audio_tensor = outputs.speech_outputs[0].cpu()
+                if audio_tensor.dtype == torch.bfloat16:
+                    audio_tensor = audio_tensor.to(torch.float32)
+                audio_array = audio_tensor.numpy()
                 
                 # Convert to bytes
                 temp_file = self.temp_dir / f"vibevoice_{int(time.time() * 1000)}.wav"
-                sf.write(temp_file, audio_array, request.sample_rate)
+                
+                # Ensure audio array is in the right format
+                if audio_array.ndim > 1:
+                    # If multi-channel, take the first channel or flatten
+                    audio_array = audio_array.squeeze()
+                
+                # Ensure it's 1D
+                if audio_array.ndim > 1:
+                    audio_array = audio_array[0]  # Take first channel
+                
+                # Normalize if needed
+                audio_array = audio_array.astype(np.float32)
+                
+                logger.info(f"🎵 Audio array shape: {audio_array.shape}, dtype: {audio_array.dtype}, sample_rate: {request.sample_rate}")
+                
+                sf.write(temp_file, audio_array, request.sample_rate, subtype='PCM_16')
                 
                 audio_bytes = temp_file.read_bytes()
                 temp_file.unlink()
@@ -546,12 +572,12 @@ class VibeVoiceService:
         
         # Map speaker names to voice files
         voice_mapping = {
-            "Alice": "alice.wav",
-            "Andrew": "andrew.wav",
-            "Frank": "frank.wav",
+            "Alice": "en-Alice_woman.wav",
+            "Andrew": "en-Carter_man.wav",  # Use Carter as Andrew substitute
+            "Frank": "en-Frank_man.wav",
         }
         
-        voice_file = voice_mapping.get(speaker_name, "alice.wav")
+        voice_file = voice_mapping.get(speaker_name, "en-Alice_woman.wav")
         voice_path = voices_dir / voice_file
         
         if voice_path.exists():
@@ -559,7 +585,7 @@ class VibeVoiceService:
         else:
             # Return a default or create a synthetic voice sample
             logger.warning(f"Voice sample not found for {speaker_name}, using default")
-            return str(voices_dir / "alice.wav") if (voices_dir / "alice.wav").exists() else ""
+            return str(voices_dir / "en-Alice_woman.wav") if (voices_dir / "en-Alice_woman.wav").exists() else ""
 
     async def get_available_voices(self) -> Dict[str, Dict[str, Any]]:
         """Get list of available voices"""

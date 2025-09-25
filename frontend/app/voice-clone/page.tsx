@@ -150,7 +150,18 @@ export default function VoiceClonePage() {
   useEffect(() => {
     loadAvailableVoices()
     loadSavedVoiceClones()
+    // Small delay to let localStorage data load first
+    setTimeout(() => {
+      reconcileWithBackend()
+    }, 100)
   }, [])
+  
+  // Reconcile when switching to manage tab
+  useEffect(() => {
+    if (activeTab === 'manage') {
+      reconcileWithBackend()
+    }
+  }, [activeTab])
   
   const loadAvailableVoices = async () => {
     try {
@@ -171,6 +182,66 @@ export default function VoiceClonePage() {
       console.error('Error loading available voices from API:', error)
       console.log('📢 Using mock voices as fallback due to connection error')
       setAvailableVoices(mockVoices) // Use mock data as fallback
+    }
+  }
+  
+  const reconcileWithBackend = async () => {
+    try {
+      console.log('🔄 Reconciling frontend voice clones with backend...')
+      const response = await fetch('http://localhost:8001/api/v1/voice-clones')
+      if (response.ok) {
+        const data = await response.json()
+        const backendClones = Array.isArray(data.voice_clones) ? data.voice_clones : []
+        console.log('📋 Backend clones found:', backendClones)
+        
+        if (backendClones.length > 0) {
+          // Use functional state update to get current state
+          setVoiceClones(currentVoiceClones => {
+            const updatedClones = currentVoiceClones.map(frontendClone => {
+              const matchingBackendClone = backendClones.find((bc: any) => 
+                bc.name === frontendClone.name || bc.voice_id === frontendClone.id || bc.voice_id === frontendClone.backendId
+              )
+              
+              if (matchingBackendClone) {
+                console.log(`✅ Syncing clone "${frontendClone.name}" with backend ID: ${matchingBackendClone.voice_id}`)
+                return {
+                  ...frontendClone,
+                  id: matchingBackendClone.voice_id, // Update to use backend ID
+                  backendId: matchingBackendClone.voice_id,
+                  backendSynced: true,
+                  status: 'ready' as const
+                }
+              }
+              
+              return frontendClone
+            })
+            
+            // Only update if there are actual changes
+            if (JSON.stringify(updatedClones) !== JSON.stringify(currentVoiceClones)) {
+              console.log('🔄 Updating voice clones with backend sync status')
+              saveVoiceClones(updatedClones)
+              
+              // Schedule current clone update for next render
+              setTimeout(() => {
+                setCurrentClone(prevCurrentClone => {
+                  if (prevCurrentClone) {
+                    const updatedCurrentClone = updatedClones.find(c => c.name === prevCurrentClone.name)
+                    return updatedCurrentClone || prevCurrentClone
+                  }
+                  return prevCurrentClone
+                })
+              }, 0)
+              
+              return updatedClones
+            }
+            
+            return currentVoiceClones
+          })
+        }
+      }
+    } catch (error) {
+      console.error('❌ Failed to reconcile with backend:', error)
+      // Don't show error to user as this is a background operation
     }
   }
   
@@ -562,7 +633,7 @@ export default function VoiceClonePage() {
   // Test voice clone with VibeVoice
   const testVoiceClone = async (cloneParam: VoiceClone) => {
     // Always use the most current version from state to ensure we have latest backend sync
-    const clone = voiceClones.find(c => c.id === cloneParam.id || c.backendId === cloneParam.id || c.backendId === cloneParam.backendId) || cloneParam
+    let clone = voiceClones.find(c => c.id === cloneParam.id || c.backendId === cloneParam.id || c.backendId === cloneParam.backendId) || cloneParam
     
     if (clone.samples.length === 0) {
       setError('Please add at least one voice sample to test this clone')
@@ -586,10 +657,21 @@ export default function VoiceClonePage() {
         name: clone.name
       })
       
-      // If this voice clone is not synced with backend, we cannot test it
+      // If this voice clone is not synced with backend, try to reconcile first
       if (!clone.backendSynced) {
-        setError(`❌ Voice clone "${clone.name}" is not synced with backend. Please create voice samples to enable testing.`)
-        return
+        console.log('⚠️ Clone not synced, attempting reconciliation before test...')
+        await reconcileWithBackend()
+        
+        // Check again after reconciliation
+        const updatedClone = voiceClones.find(c => c.name === clone.name)
+        if (updatedClone && !updatedClone.backendSynced) {
+          setError(`❌ Voice clone "${clone.name}" is not synced with backend.\n\nThis means the voice clone exists only locally and hasn't been uploaded to the VibeVoice server yet.\n\nTo fix this:\n1. Click "Edit" on this voice clone\n2. Upload a WAV voice sample with transcript\n3. The system will automatically sync with the backend`)
+          return
+        }
+        // Update clone reference if reconciliation worked
+        if (updatedClone && updatedClone.backendSynced) {
+          clone = updatedClone
+        }
       }
       
       // Reconcile with backend list to ensure we use the correct, server-side voice_id
@@ -664,9 +746,9 @@ export default function VoiceClonePage() {
         
         setSuccess(`🎉 Voice clone test successful! Generated ${Math.round(audioBlob.size / 1024)}KB audio for ${clone.name} using VibeVoice-Large.`)
         
-      } else if (response.status === 404 || response.status === 503) {
+      } else if (response.status === 404 || response.status === 500 || response.status === 503) {
         // Voice clone service not available, try fallback
-        console.log('🚨 Voice clone endpoint not available, trying fallback TTS...')
+        console.log('🚨 Voice clone endpoint failed with status ' + response.status + ', trying fallback TTS...')
         
         const fallbackResponse = await fetch('http://localhost:8001/api/v1/tts', {
           method: 'POST',
@@ -686,7 +768,7 @@ export default function VoiceClonePage() {
           setCurrentPlayingAudio(audio)
           audio.play().catch(e => console.error('Audio play error:', e))
           
-          setError('⚠️ Voice clone service unavailable. Playing with fallback voice (Ava). VibeVoice-Large model may need setup.')
+          setError(`⚠️ Voice cloning with VibeVoice failed. Playing with fallback voice (Ava).\n\n🔧 VibeVoice Issues Detected:\n- ONNX Runtime version mismatch (IR v11 vs v10)\n- VibeVoice package installation issues\n- Voice clone ID synchronization problems\n\n💡 The voice clone functionality needs VibeVoice setup or we can switch to IndexTTS for a working solution.`)
         } else {
           throw new Error('Both voice clone and fallback TTS failed')
         }
@@ -2063,10 +2145,21 @@ export default function VoiceClonePage() {
               exit={{ opacity: 0, x: 20 }}
               className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-8"
             >
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-3">
-                <UserIcon className="h-6 w-6 text-purple-600" />
-                Your Voice Clones ({voiceClones.length})
-              </h2>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3">
+                  <UserIcon className="h-6 w-6 text-purple-600" />
+                  Your Voice Clones ({voiceClones.length})
+                </h2>
+                <button
+                  onClick={reconcileWithBackend}
+                  disabled={isProcessing}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+                  title="Sync with backend to check for new voice clones"
+                >
+                  <ArrowPathIcon className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                  {isProcessing ? 'Syncing...' : 'Sync Backend'}
+                </button>
+              </div>
               
               {voiceClones.length === 0 ? (
                 <div className="text-center py-12">
@@ -2093,9 +2186,13 @@ export default function VoiceClonePage() {
                           {clone.name}
                         </h3>
                         <div className="flex items-center gap-2">
-                          {clone.backendSynced && (
-                            <div className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-full" title="Synced with backend">
+                          {clone.backendSynced ? (
+                            <div className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-full" title="Synced with VibeVoice backend - ready for testing">
                               🔗 Synced
+                            </div>
+                          ) : (
+                            <div className="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full" title="Local only - needs voice sample to sync with backend">
+                              ⚠️ Local Only
                             </div>
                           )}
                           <div className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -2139,10 +2236,15 @@ export default function VoiceClonePage() {
                         </button>
                         <button
                           onClick={() => testVoiceClone(clone)}
-                          disabled={isProcessing || clone.samples.length === 0}
+                          disabled={isProcessing || clone.samples.length === 0 || !clone.backendSynced}
                           className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white text-sm rounded-lg transition-colors"
+                          title={
+                            !clone.backendSynced ? 'Voice clone must be synced with backend to test' :
+                            clone.samples.length === 0 ? 'Voice clone needs voice samples to test' :
+                            'Test this voice clone with VibeVoice'
+                          }
                         >
-                          Test
+                          {!clone.backendSynced ? '🔄 Sync First' : 'Test'}
                         </button>
                         <button
                           onClick={() => deleteVoiceClone(clone.id)}
