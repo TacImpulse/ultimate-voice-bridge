@@ -320,13 +320,19 @@ class VibeVoiceService:
             
             voice_config = self.voice_configs[voice]
             
-            # Auto-detect multi-speaker if not specified
+            # CRITICAL: Auto-format text for voice clones and VibeVoice engines
+            processed_text = text
+            if (voice.startswith('voice_clone_') or 
+                voice_config.engine in [TTSEngine.VIBEVOICE_1_5B, TTSEngine.VIBEVOICE_7B]):
+                processed_text = self._format_text_for_vibevoice(text, voice)
+            
+            # Auto-detect multi-speaker if not specified (use processed text)
             if multi_speaker is None:
-                multi_speaker = self._detect_multi_speaker(text)
+                multi_speaker = self._detect_multi_speaker(processed_text)
             
             # Create TTS request
             request = TTSRequest(
-                text=text,
+                text=processed_text,  # Use processed text with speaker formatting
                 voice_config=voice_config,
                 output_format=output_format,
                 multi_speaker=multi_speaker,
@@ -974,9 +980,14 @@ class VibeVoiceService:
                 logger.error(f"❌ Voice clone '{voice_id}' not found in voice_configs")
                 raise Exception(f"Voice clone '{voice_id}' not found")
             
+            # CRITICAL FIX: Format text with speaker annotation for VibeVoice
+            # VibeVoice expects speaker-tagged format like "Speaker 0: Hello there!"
+            formatted_text = self._format_text_for_vibevoice(text, voice_id)
+            logger.info(f"📝 Formatted text for VibeVoice: '{formatted_text[:100]}...'")
+            
             # Generate speech using the voice clone
             audio_data = await self.generate_speech(
-                text=text,
+                text=formatted_text,  # Use formatted text instead of raw text
                 voice=voice_id,
                 output_format="wav"
             )
@@ -1025,3 +1036,26 @@ class VibeVoiceService:
         except Exception as e:
             logger.error(f"❌ Failed to get voice clones: {e}")
             raise Exception(f"Failed to get voice clones: {str(e)}")
+    
+    def _format_text_for_vibevoice(self, text: str, voice_id: str) -> str:
+        """Format text with proper speaker annotations for VibeVoice model"""
+        try:
+            # Clean the input text first
+            cleaned_text = text.strip()
+            
+            # Check if text already has speaker annotations
+            import re
+            if re.search(r'^(Speaker \d+|\[S\d+\])\s*:', cleaned_text, re.IGNORECASE | re.MULTILINE):
+                logger.info("📝 Text already has speaker annotations")
+                return cleaned_text
+            
+            # Add Speaker 0 annotation (VibeVoice standard format)
+            # Use Speaker 0 for single-speaker voice clones
+            formatted_text = f"Speaker 0: {cleaned_text}"
+            
+            logger.info(f"✨ Formatted text for VibeVoice: Original='{text[:30]}...' -> Formatted='{formatted_text[:50]}...'")
+            return formatted_text
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Text formatting failed, using original text: {e}")
+            return text  # Fallback to original text
