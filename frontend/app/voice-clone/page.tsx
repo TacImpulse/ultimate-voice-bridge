@@ -72,14 +72,15 @@ interface VoiceLibraryEntry {
   ageRange: string
   description: string
   quality: number // 1-5 stars
-  source: 'OpenVoice' | 'Coqui-TTS' | 'Microsoft' | 'Mozilla' | 'ElevenLabs' | 'Bark' | 'Community'
-  license: 'Open Source' | 'Free Commercial' | 'Attribution Required' | 'Non-Commercial'
+  source: 'OpenVoice' | 'Coqui-TTS' | 'Microsoft' | 'Mozilla' | 'ElevenLabs' | 'Bark' | 'Community' | 'Google' | 'System' | 'Festival' | 'eSpeak'
+  license: 'Open Source' | 'Free Commercial' | 'Attribution Required' | 'Non-Commercial' | 'Free Tier' | 'Free'
   modelSize: string
   sampleUrl?: string
   githubUrl?: string
   paperUrl?: string
   tags: string[]
   featured: boolean
+  webSpeechName?: string // For Web Speech API compatibility
 }
 
 export default function VoiceClonePage() {
@@ -375,8 +376,710 @@ export default function VoiceClonePage() {
       modelSize: '1.5GB',
       tags: ['Robotic', 'Futuristic', 'AI'],
       featured: false
+    },
+    
+    // ===== WEB SPEECH API VOICES (FREE & BUILT-IN) =====
+    {
+      id: 'webspeech_samantha',
+      name: 'Samantha (System)',
+      gender: 'Female',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'General American',
+      style: ['Assistant', 'Clear', 'System'],
+      ageRange: '25-35',
+      description: 'Built-in system voice with clear pronunciation. Available on most devices for immediate testing.',
+      quality: 4,
+      source: 'System',
+      license: 'Free',
+      modelSize: 'Built-in',
+      tags: ['System', 'Built-in', 'Reliable'],
+      featured: true,
+      webSpeechName: 'Samantha'
+    },
+    {
+      id: 'webspeech_alex',
+      name: 'Alex (System)',
+      gender: 'Male',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'General American',
+      style: ['Assistant', 'Clear', 'System'],
+      ageRange: '30-40',
+      description: 'Built-in male system voice with natural tone. Widely available for immediate voice testing.',
+      quality: 4,
+      source: 'System',
+      license: 'Free',
+      modelSize: 'Built-in',
+      tags: ['System', 'Built-in', 'Natural'],
+      featured: true,
+      webSpeechName: 'Alex'
+    },
+    
+    // ===== GOOGLE VOICES (FREE TIER) =====
+    {
+      id: 'google_en_us_standard_a',
+      name: 'Standard-A (Google)',
+      gender: 'Female',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'General American',
+      style: ['Standard', 'Clear', 'Professional'],
+      ageRange: '25-35',
+      description: 'Google\'s standard English voice with clear pronunciation and professional tone.',
+      quality: 4,
+      source: 'Google',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Google', 'Standard', 'Cloud'],
+      featured: false,
+      webSpeechName: 'Google US English'
+    },
+    {
+      id: 'google_en_us_standard_b',
+      name: 'Standard-B (Google)',
+      gender: 'Male',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'General American',
+      style: ['Standard', 'Clear', 'Professional'],
+      ageRange: '30-40',
+      description: 'Google\'s male English voice with authoritative tone and clear articulation.',
+      quality: 4,
+      source: 'Google',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Google', 'Standard', 'Authoritative'],
+      featured: false,
+      webSpeechName: 'Google US English'
+    },
+    {
+      id: 'google_en_uk_standard_a',
+      name: 'UK Standard-A (Google)',
+      gender: 'Female',
+      nationality: 'British',
+      language: 'English (UK)',
+      accent: 'Received Pronunciation',
+      style: ['Standard', 'British', 'Elegant'],
+      ageRange: '25-35',
+      description: 'Google\'s British English voice with elegant RP accent and professional tone.',
+      quality: 4,
+      source: 'Google',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Google', 'British', 'Elegant'],
+      featured: false,
+      webSpeechName: 'Google UK English Female'
+    },
+    {
+      id: 'google_en_au_standard_a',
+      name: 'AU Standard-A (Google)',
+      gender: 'Female',
+      nationality: 'Australian',
+      language: 'English (AU)',
+      accent: 'General Australian',
+      style: ['Standard', 'Australian', 'Friendly'],
+      ageRange: '25-35',
+      description: 'Google\'s Australian English voice with friendly accent and upbeat tone.',
+      quality: 4,
+      source: 'Google',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Google', 'Australian', 'Friendly'],
+      featured: false,
+      webSpeechName: 'Google UK English Female'
+    },
+    
+    // ===== MICROSOFT VOICES (FREE TIER) =====
+    {
+      id: 'microsoft_aria',
+      name: 'Aria (Microsoft)',
+      gender: 'Female',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'General American',
+      style: ['Conversational', 'Friendly', 'Modern'],
+      ageRange: '25-35',
+      description: 'Microsoft\'s modern conversational voice with natural intonation and friendly tone.',
+      quality: 5,
+      source: 'Microsoft',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Microsoft', 'Neural', 'Modern'],
+      featured: true,
+      webSpeechName: 'Microsoft Aria Online (Natural) - English (United States)'
+    },
+    {
+      id: 'microsoft_guy',
+      name: 'Guy (Microsoft)',
+      gender: 'Male',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'General American',
+      style: ['Conversational', 'Casual', 'Modern'],
+      ageRange: '30-40',
+      description: 'Microsoft\'s casual male voice with natural speech patterns and modern appeal.',
+      quality: 5,
+      source: 'Microsoft',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Microsoft', 'Neural', 'Casual'],
+      featured: true,
+      webSpeechName: 'Microsoft Guy Online (Natural) - English (United States)'
+    },
+    {
+      id: 'microsoft_jenny',
+      name: 'Jenny (Microsoft)',
+      gender: 'Female',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'General American',
+      style: ['Assistant', 'Professional', 'Reliable'],
+      ageRange: '28-38',
+      description: 'Microsoft\'s reliable assistant voice with professional tone and clear articulation.',
+      quality: 4,
+      source: 'Microsoft',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Microsoft', 'Assistant', 'Professional'],
+      featured: false,
+      webSpeechName: 'Microsoft Jenny Online (Natural) - English (United States)'
+    },
+    {
+      id: 'microsoft_ryan',
+      name: 'Ryan (Microsoft)',
+      gender: 'Male',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'General American',
+      style: ['News', 'Authoritative', 'Clear'],
+      ageRange: '35-45',
+      description: 'Microsoft\'s authoritative news voice with commanding presence and clear delivery.',
+      quality: 4,
+      source: 'Microsoft',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Microsoft', 'News', 'Authoritative'],
+      featured: false,
+      webSpeechName: 'Microsoft Ryan Online (Natural) - English (United States)'
+    },
+    {
+      id: 'microsoft_libby',
+      name: 'Libby (Microsoft UK)',
+      gender: 'Female',
+      nationality: 'British',
+      language: 'English (UK)',
+      accent: 'Received Pronunciation',
+      style: ['British', 'Elegant', 'Professional'],
+      ageRange: '25-35',
+      description: 'Microsoft\'s British voice with elegant RP accent and sophisticated delivery.',
+      quality: 5,
+      source: 'Microsoft',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Microsoft', 'British', 'Sophisticated'],
+      featured: false,
+      webSpeechName: 'Microsoft Libby Online (Natural) - English (United Kingdom)'
+    },
+    
+    // ===== COQUI VOICES (OPEN SOURCE) =====
+    {
+      id: 'coqui_ljspeech',
+      name: 'LJSpeech (Coqui)',
+      gender: 'Female',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'General American',
+      style: ['Reading', 'Audiobook', 'Clear'],
+      ageRange: '30-40',
+      description: 'High-quality voice trained on the LJSpeech dataset. Perfect for audiobooks and reading applications.',
+      quality: 5,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '120MB',
+      githubUrl: 'https://github.com/coqui-ai/TTS',
+      tags: ['VITS', 'LJSpeech', 'Audiobook'],
+      featured: true
+    },
+    {
+      id: 'coqui_vctk_p225',
+      name: 'VCTK-225 (Scottish)',
+      gender: 'Female',
+      nationality: 'Scottish',
+      language: 'English (UK)',
+      accent: 'Scottish',
+      style: ['Accent', 'Character', 'Regional'],
+      ageRange: '22-28',
+      description: 'Scottish-accented female voice from the VCTK dataset. Great for character voices and regional content.',
+      quality: 4,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '95MB',
+      tags: ['VCTK', 'Scottish', 'Accent'],
+      featured: false
+    },
+    {
+      id: 'coqui_vctk_p226',
+      name: 'VCTK-226 (Northern English)',
+      gender: 'Male',
+      nationality: 'British',
+      language: 'English (UK)',
+      accent: 'Northern English',
+      style: ['Accent', 'Regional', 'Character'],
+      ageRange: '25-32',
+      description: 'Northern English male voice with distinctive regional accent. Perfect for character work.',
+      quality: 4,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '98MB',
+      tags: ['VCTK', 'Northern', 'Regional'],
+      featured: false
+    },
+    {
+      id: 'coqui_vctk_p227',
+      name: 'VCTK-227 (Irish)',
+      gender: 'Male',
+      nationality: 'Irish',
+      language: 'English (IE)',
+      accent: 'Irish',
+      style: ['Accent', 'Character', 'Storytelling'],
+      ageRange: '28-35',
+      description: 'Irish-accented male voice with warm, storytelling quality. Great for narrative content.',
+      quality: 4,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '102MB',
+      tags: ['VCTK', 'Irish', 'Storytelling'],
+      featured: false
+    },
+    {
+      id: 'coqui_vctk_p243',
+      name: 'VCTK-243 (Welsh)',
+      gender: 'Female',
+      nationality: 'Welsh',
+      language: 'English (UK)',
+      accent: 'Welsh',
+      style: ['Accent', 'Musical', 'Character'],
+      ageRange: '26-33',
+      description: 'Welsh-accented female voice with musical intonation. Perfect for character voices and regional content.',
+      quality: 4,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '96MB',
+      tags: ['VCTK', 'Welsh', 'Musical'],
+      featured: false
+    },
+    
+    // ===== MOZILLA COMMON VOICE =====
+    {
+      id: 'mozilla_cv_en_us_1',
+      name: 'CommonVoice-EN-1',
+      gender: 'Female',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'General American',
+      style: ['Community', 'Natural', 'Diverse'],
+      ageRange: '25-35',
+      description: 'Community-contributed voice from Mozilla Common Voice. Natural and diverse speech patterns.',
+      quality: 3,
+      source: 'Mozilla',
+      license: 'Open Source',
+      modelSize: '180MB',
+      githubUrl: 'https://github.com/mozilla/TTS',
+      tags: ['Community', 'Diverse', 'Open'],
+      featured: false
+    },
+    {
+      id: 'mozilla_cv_en_us_2',
+      name: 'CommonVoice-EN-2',
+      gender: 'Male',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'General American',
+      style: ['Community', 'Casual', 'Diverse'],
+      ageRange: '30-40',
+      description: 'Community male voice with casual, natural delivery. Part of the open voice revolution.',
+      quality: 3,
+      source: 'Mozilla',
+      license: 'Open Source',
+      modelSize: '165MB',
+      tags: ['Community', 'Casual', 'Natural'],
+      featured: false
+    },
+    
+    // ===== INTERNATIONAL EXPANSION =====
+    {
+      id: 'coqui_fr_mai',
+      name: 'Mai (French)',
+      gender: 'Female',
+      nationality: 'French',
+      language: 'French',
+      accent: 'Standard French',
+      style: ['Professional', 'Clear', 'Native'],
+      ageRange: '25-35',
+      description: 'Native French speaker with clear, professional pronunciation. Perfect for French content creation.',
+      quality: 4,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '145MB',
+      tags: ['Native', 'Professional', 'Clear'],
+      featured: false,
+      webSpeechName: 'Google français'
+    },
+    {
+      id: 'coqui_de_thorsten',
+      name: 'Thorsten (German)',
+      gender: 'Male',
+      nationality: 'German',
+      language: 'German',
+      accent: 'Standard German',
+      style: ['Authoritative', 'Clear', 'Professional'],
+      ageRange: '35-45',
+      description: 'Authoritative German voice with precise pronunciation. Excellent for technical and professional content.',
+      quality: 5,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '165MB',
+      tags: ['Authoritative', 'Technical', 'Native'],
+      featured: false,
+      webSpeechName: 'Google Deutsch'
+    },
+    {
+      id: 'coqui_es_carlfm',
+      name: 'Carlos (Spanish)',
+      gender: 'Male',
+      nationality: 'Spanish',
+      language: 'Spanish',
+      accent: 'European Spanish',
+      style: ['Professional', 'News', 'Clear'],
+      ageRange: '30-40',
+      description: 'Professional European Spanish voice with news-quality clarity and pronunciation.',
+      quality: 4,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '155MB',
+      tags: ['Professional', 'News', 'European'],
+      featured: false,
+      webSpeechName: 'Google español'
+    },
+    {
+      id: 'coqui_pt_brazilian',
+      name: 'Isabella (Brazilian)',
+      gender: 'Female',
+      nationality: 'Brazilian',
+      language: 'Portuguese (BR)',
+      accent: 'Brazilian Portuguese',
+      style: ['Warm', 'Friendly', 'Native'],
+      ageRange: '25-35',
+      description: 'Warm Brazilian Portuguese voice with native accent and friendly tone.',
+      quality: 4,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '140MB',
+      tags: ['Brazilian', 'Warm', 'Native'],
+      featured: false,
+      webSpeechName: 'Google português do Brasil'
+    },
+    {
+      id: 'coqui_it_riccardo',
+      name: 'Riccardo (Italian)',
+      gender: 'Male',
+      nationality: 'Italian',
+      language: 'Italian',
+      accent: 'Standard Italian',
+      style: ['Expressive', 'Passionate', 'Native'],
+      ageRange: '28-38',
+      description: 'Expressive Italian voice with passionate delivery and native pronunciation.',
+      quality: 4,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '150MB',
+      tags: ['Expressive', 'Passionate', 'Italian'],
+      featured: false,
+      webSpeechName: 'Google italiano'
+    },
+    
+    // ===== ASIAN LANGUAGES =====
+    {
+      id: 'coqui_ja_kokoro',
+      name: 'Kokoro (Japanese)',
+      gender: 'Female',
+      nationality: 'Japanese',
+      language: 'Japanese',
+      accent: 'Standard Japanese',
+      style: ['Anime', 'Cute', 'Expressive'],
+      ageRange: '18-25',
+      description: 'Expressive Japanese voice with anime-style characteristics. Perfect for Japanese content and character voices.',
+      quality: 4,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '180MB',
+      tags: ['Anime', 'Japanese', 'Expressive'],
+      featured: false,
+      webSpeechName: 'Google 日本語'
+    },
+    {
+      id: 'microsoft_zh_xiaoxiao',
+      name: 'Xiaoxiao (Chinese)',
+      gender: 'Female',
+      nationality: 'Chinese',
+      language: 'Chinese (Mandarin)',
+      accent: 'Beijing Mandarin',
+      style: ['Professional', 'Clear', 'Modern'],
+      ageRange: '25-35',
+      description: 'Modern Chinese voice with clear Beijing Mandarin pronunciation. Professional quality for business use.',
+      quality: 5,
+      source: 'Microsoft',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Chinese', 'Mandarin', 'Professional'],
+      featured: false,
+      webSpeechName: 'Microsoft Xiaoxiao Online (Natural) - Chinese (Mainland)'
+    },
+    {
+      id: 'google_ko_standard_a',
+      name: 'Korean Standard-A',
+      gender: 'Female',
+      nationality: 'Korean',
+      language: 'Korean',
+      accent: 'Standard Korean',
+      style: ['Standard', 'Clear', 'Professional'],
+      ageRange: '25-35',
+      description: 'Standard Korean voice with clear pronunciation and professional tone.',
+      quality: 4,
+      source: 'Google',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Korean', 'Standard', 'Clear'],
+      featured: false,
+      webSpeechName: 'Google 한국어'
+    },
+    
+    // ===== SPECIALIZED AND CHARACTER VOICES =====
+    {
+      id: 'bark_narrator',
+      name: 'The Narrator (Bark)',
+      gender: 'Male',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'Theatrical',
+      style: ['Narrator', 'Dramatic', 'Storytelling'],
+      ageRange: '40-50',
+      description: 'Dramatic narrator voice perfect for storytelling, documentaries, and theatrical content.',
+      quality: 4,
+      source: 'Bark',
+      license: 'Non-Commercial',
+      modelSize: '3.5GB',
+      tags: ['Narrator', 'Dramatic', 'Theater'],
+      featured: false
+    },
+    {
+      id: 'bark_oldman',
+      name: 'Old Sage (Bark)',
+      gender: 'Male',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'Aged',
+      style: ['Elderly', 'Wise', 'Character'],
+      ageRange: '65-75',
+      description: 'Aged, wise character voice perfect for storytelling, grandfather figures, and wisdom-based content.',
+      quality: 3,
+      source: 'Bark',
+      license: 'Non-Commercial',
+      modelSize: '3.2GB',
+      tags: ['Elderly', 'Character', 'Wise'],
+      featured: false
+    },
+    {
+      id: 'bark_pirate',
+      name: 'Captain Hook (Character)',
+      gender: 'Male',
+      nationality: 'British',
+      language: 'English (UK)',
+      accent: 'Pirate',
+      style: ['Character', 'Pirate', 'Entertainment'],
+      ageRange: '35-45',
+      description: 'Pirate character voice with theatrical British accent. Perfect for entertainment and character work.',
+      quality: 3,
+      source: 'Bark',
+      license: 'Non-Commercial',
+      modelSize: '3.1GB',
+      tags: ['Character', 'Pirate', 'Theater'],
+      featured: false
+    },
+    
+    // ===== ACCESSIBILITY VOICES =====
+    {
+      id: 'festival_clear',
+      name: 'Clear Speech (Festival)',
+      gender: 'Non-binary',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'Neutral',
+      style: ['Accessibility', 'Clear', 'Simple'],
+      ageRange: 'N/A',
+      description: 'Ultra-clear speech optimized for accessibility applications and screen readers.',
+      quality: 3,
+      source: 'Festival',
+      license: 'Open Source',
+      modelSize: '45MB',
+      githubUrl: 'https://github.com/festvox/festival',
+      tags: ['Accessibility', 'Clear', 'Lightweight'],
+      featured: false
+    },
+    {
+      id: 'espeak_robotic',
+      name: 'eSpeak Robot',
+      gender: 'Non-binary',
+      nationality: 'Synthetic',
+      language: 'English (Neutral)',
+      accent: 'Digital',
+      style: ['Robotic', 'Retro', 'Accessibility'],
+      ageRange: 'N/A',
+      description: 'Classic robotic voice from eSpeak. Perfect for retro applications and accessibility.',
+      quality: 2,
+      source: 'eSpeak',
+      license: 'Open Source',
+      modelSize: '15MB',
+      tags: ['Robotic', 'Retro', 'Classic'],
+      featured: false
+    },
+    
+    // ===== GAMING AND ENTERTAINMENT =====
+    {
+      id: 'bark_gaming_male',
+      name: 'GameMaster (Male)',
+      gender: 'Male',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'Gaming',
+      style: ['Gaming', 'Energetic', 'Commentary'],
+      ageRange: '25-35',
+      description: 'Energetic gaming voice perfect for game commentary, streaming, and interactive entertainment.',
+      quality: 4,
+      source: 'Bark',
+      license: 'Non-Commercial',
+      modelSize: '2.9GB',
+      tags: ['Gaming', 'Streaming', 'Energetic'],
+      featured: false
+    },
+    {
+      id: 'bark_gaming_female',
+      name: 'GameMaster (Female)',
+      gender: 'Female',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'Gaming',
+      style: ['Gaming', 'Upbeat', 'Commentary'],
+      ageRange: '22-32',
+      description: 'Upbeat female gaming voice perfect for streaming, tutorials, and gaming content.',
+      quality: 4,
+      source: 'Bark',
+      license: 'Non-Commercial',
+      modelSize: '2.8GB',
+      tags: ['Gaming', 'Streaming', 'Upbeat'],
+      featured: false
+    },
+    
+    // ===== EDUCATIONAL VOICES =====
+    {
+      id: 'coqui_teacher_female',
+      name: 'Professor Sarah',
+      gender: 'Female',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'Academic',
+      style: ['Educational', 'Patient', 'Clear'],
+      ageRange: '35-45',
+      description: 'Patient, clear voice perfect for educational content, tutorials, and academic presentations.',
+      quality: 4,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '185MB',
+      tags: ['Educational', 'Academic', 'Patient'],
+      featured: false
+    },
+    {
+      id: 'coqui_teacher_male',
+      name: 'Professor David',
+      gender: 'Male',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'Academic',
+      style: ['Educational', 'Authoritative', 'Scholarly'],
+      ageRange: '40-50',
+      description: 'Scholarly male voice with authoritative tone, perfect for academic lectures and educational content.',
+      quality: 4,
+      source: 'Coqui-TTS',
+      license: 'Open Source',
+      modelSize: '175MB',
+      tags: ['Educational', 'Scholarly', 'Academic'],
+      featured: false
+    },
+    
+    // ===== BUSINESS AND CORPORATE =====
+    {
+      id: 'microsoft_corporate_male',
+      name: 'Executive (Microsoft)',
+      gender: 'Male',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'Corporate',
+      style: ['Corporate', 'Professional', 'Executive'],
+      ageRange: '40-50',
+      description: 'Executive-level voice perfect for corporate presentations, board meetings, and business content.',
+      quality: 5,
+      source: 'Microsoft',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Corporate', 'Executive', 'Business'],
+      featured: false,
+      webSpeechName: 'Microsoft Brian Online (Natural) - English (United States)'
+    },
+    {
+      id: 'google_corporate_female',
+      name: 'CEO Sarah (Google)',
+      gender: 'Female',
+      nationality: 'American',
+      language: 'English (US)',
+      accent: 'Corporate',
+      style: ['Corporate', 'Leadership', 'Confident'],
+      ageRange: '35-45',
+      description: 'Confident female executive voice perfect for leadership content and corporate communications.',
+      quality: 5,
+      source: 'Google',
+      license: 'Free Tier',
+      modelSize: 'Cloud',
+      tags: ['Corporate', 'Leadership', 'Confident'],
+      featured: false,
+      webSpeechName: 'Google US English'
     }
   ]
+  
+  // Initialize Web Speech API voices
+  const initializeWebSpeechVoices = () => {
+    if ('speechSynthesis' in window) {
+      // Load voices - may need to wait for them to be available
+      const loadVoices = () => {
+        const voices = window.speechSynthesis.getVoices()
+        if (voices.length > 0) {
+          console.log(`🎤 Found ${voices.length} Web Speech API voices:`, voices.map(v => `${v.name} (${v.lang})`).join(', '))
+          // Voices are now available for use in testLibraryVoice
+        } else {
+          // Voices might not be loaded yet, try again
+          setTimeout(loadVoices, 100)
+        }
+      }
+      
+      // Load voices immediately and also listen for the event
+      loadVoices()
+      window.speechSynthesis.addEventListener('voiceschanged', loadVoices)
+      
+      return () => {
+        window.speechSynthesis.removeEventListener('voiceschanged', loadVoices)
+      }
+    }
+  }
   
   // Load available voices and voice library on component mount
   useEffect(() => {
@@ -384,10 +1087,14 @@ export default function VoiceClonePage() {
     loadSavedVoiceClones()
     initializeVoiceLibrary()
     loadFavoriteVoices()
+    const cleanupWebSpeech = initializeWebSpeechVoices()
+    
     // Small delay to let localStorage data load first
     setTimeout(() => {
       reconcileWithBackend()
     }, 100)
+    
+    return cleanupWebSpeech
   }, [])
   
   // Filter voices when filters change
@@ -498,14 +1205,79 @@ export default function VoiceClonePage() {
     const testText = `Hello! This is ${voice.name}, a ${voice.gender.toLowerCase()} voice from ${voice.nationality} with a ${voice.accent} accent. This voice is perfect for ${voice.style.join(', ')} content.`
     
     setSuccess(`🎧 Testing ${voice.name}... "${testText}"`)
-    console.log(`🎧 Would test voice: ${voice.name} with text: ${testText}`)
     
-    // In a real implementation, this would call the voice API
-    // For now, just show a demo message
-    setTimeout(() => {
-      setSuccess(`🎵 Voice test complete for ${voice.name}! In production, this would generate audio using the ${voice.source} engine.`)
-      setTimeout(() => setSuccess(null), 5000)
-    }, 2000)
+    try {
+      // Check if Web Speech API is available
+      if ('speechSynthesis' in window) {
+        // Stop any existing speech
+        window.speechSynthesis.cancel()
+        
+        // Create speech synthesis utterance
+        const utterance = new SpeechSynthesisUtterance(testText)
+        
+        // Try to find and use the specified voice
+        if (voice.webSpeechName) {
+          const voices = window.speechSynthesis.getVoices()
+          const targetVoice = voices.find(v => 
+            v.name.includes(voice.webSpeechName!) ||
+            v.name.toLowerCase().includes(voice.webSpeechName!.toLowerCase()) ||
+            (voice.language === 'English (US)' && v.lang === 'en-US') ||
+            (voice.language === 'English (UK)' && v.lang === 'en-GB') ||
+            (voice.language === 'French' && v.lang === 'fr-FR') ||
+            (voice.language === 'German' && v.lang === 'de-DE') ||
+            (voice.language === 'Spanish' && v.lang === 'es-ES') ||
+            (voice.language === 'Portuguese (BR)' && v.lang === 'pt-BR') ||
+            (voice.language === 'Italian' && v.lang === 'it-IT') ||
+            (voice.language === 'Japanese' && v.lang === 'ja-JP') ||
+            (voice.language === 'Chinese (Mandarin)' && v.lang === 'zh-CN') ||
+            (voice.language === 'Korean' && v.lang === 'ko-KR')
+          )
+          
+          if (targetVoice) {
+            utterance.voice = targetVoice
+            console.log(`🎵 Using voice: ${targetVoice.name} (${targetVoice.lang})`)
+          } else {
+            console.log(`⚠️ Could not find voice: ${voice.webSpeechName}, using default`)
+          }
+        }
+        
+        // Set voice parameters based on the voice characteristics
+        utterance.rate = voice.style.includes('Fast') ? 1.2 : 
+                        voice.style.includes('Slow') || voice.style.includes('Wise') ? 0.8 : 1.0
+        utterance.pitch = voice.gender === 'Female' ? 1.1 : 
+                         voice.gender === 'Male' ? 0.9 : 1.0
+        utterance.volume = 0.9
+        
+        // Handle events
+        utterance.onstart = () => {
+          setSuccess(`🎵 Playing ${voice.name} voice test...`)
+        }
+        
+        utterance.onend = () => {
+          setSuccess(`✅ Voice test complete for ${voice.name}! ${voice.webSpeechName ? 'Used Web Speech API.' : 'Used system default voice.'}`)
+          setTimeout(() => setSuccess(null), 4000)
+        }
+        
+        utterance.onerror = (event) => {
+          console.error('Speech synthesis error:', event)
+          setError(`❌ Voice test failed for ${voice.name}. ${event.error || 'Unknown error occurred.'}`)
+          setTimeout(() => setError(null), 4000)
+        }
+        
+        // Start speaking
+        window.speechSynthesis.speak(utterance)
+        
+      } else {
+        // Fallback for browsers without Web Speech API
+        setError(`❌ Web Speech API not supported in this browser. Cannot test ${voice.name} voice.`)
+        setTimeout(() => setError(null), 4000)
+      }
+      
+    } catch (error) {
+      console.error('Voice test error:', error)
+      setError(`❌ Failed to test ${voice.name}. Please try again.`)
+      setTimeout(() => setError(null), 4000)
+    }
   }
   
   const filterVoiceLibrary = () => {
