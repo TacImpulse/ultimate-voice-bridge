@@ -395,7 +395,10 @@ export default function VoiceClonePage() {
       modelSize: 'Built-in',
       tags: ['System', 'Built-in', 'Reliable'],
       featured: true,
-      webSpeechName: 'Samantha'
+      webSpeechName: 'Samantha',
+      ttsConfig: {
+        system_voice_name: 'Samantha'
+      }
     },
     {
       id: 'webspeech_alex',
@@ -413,7 +416,10 @@ export default function VoiceClonePage() {
       modelSize: 'Built-in',
       tags: ['System', 'Built-in', 'Natural'],
       featured: true,
-      webSpeechName: 'Alex'
+      webSpeechName: 'Alex',
+      ttsConfig: {
+        system_voice_name: 'Alex'
+      }
     },
     
     // ===== GOOGLE VOICES (FREE TIER) =====
@@ -507,7 +513,11 @@ export default function VoiceClonePage() {
       modelSize: 'Cloud',
       tags: ['Microsoft', 'Neural', 'Modern'],
       featured: true,
-      webSpeechName: 'Microsoft Aria Online (Natural) - English (United States)'
+      webSpeechName: 'Microsoft Aria Online (Natural) - English (United States)',
+      ttsConfig: {
+        ms_voice_name: 'en-US-AriaNeural',
+        system_voice_name: 'Microsoft Aria Online (Natural) - English (United States)'
+      }
     },
     {
       id: 'microsoft_guy',
@@ -525,7 +535,11 @@ export default function VoiceClonePage() {
       modelSize: 'Cloud',
       tags: ['Microsoft', 'Neural', 'Casual'],
       featured: true,
-      webSpeechName: 'Microsoft Guy Online (Natural) - English (United States)'
+      webSpeechName: 'Microsoft Guy Online (Natural) - English (United States)',
+      ttsConfig: {
+        ms_voice_name: 'en-US-GuyNeural',
+        system_voice_name: 'Microsoft Guy Online (Natural) - English (United States)'
+      }
     },
     {
       id: 'microsoft_jenny',
@@ -1106,6 +1120,8 @@ export default function VoiceClonePage() {
   useEffect(() => {
     if (activeTab === 'manage') {
       reconcileWithBackend()
+    } else if (activeTab === 'explore') {
+      checkForRealSamples()
     }
   }, [activeTab])
   
@@ -1146,6 +1162,22 @@ export default function VoiceClonePage() {
     } catch (error) {
       console.error('Error loading favorite voices:', error)
       setFavoriteVoices([])
+    }
+  }
+  
+  const checkForRealSamples = async () => {
+    try {
+      console.log('🔍 Checking for available real voice samples...')
+      const response = await fetch('http://localhost:8001/api/v1/voice-library-samples')
+      if (response.ok) {
+        const data = await response.json()
+        setAvailableRealSamples(data.sample_urls || {})
+        console.log(`✅ Found ${Object.keys(data.sample_urls || {}).length} real voice samples`)
+      } else {
+        console.log('⚠️ Backend not available for real samples, using Web Speech API fallback')
+      }
+    } catch (error) {
+      console.log('⚠️ Could not check for real samples:', error)
     }
   }
   
@@ -1201,66 +1233,303 @@ export default function VoiceClonePage() {
     setTimeout(() => setSuccess(null), 5000)
   }
   
+  const [currentTestingVoice, setCurrentTestingVoice] = useState<string | null>(null)
+  const [voiceTestStates, setVoiceTestStates] = useState<{[key: string]: 'playing' | 'paused' | 'stopped'}>({})
+  const [availableRealSamples, setAvailableRealSamples] = useState<{[key: string]: string}>({})
+  
+  const stopVoiceTest = (voiceId: string) => {
+    // Stop Web Speech API
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+    }
+    
+    // Stop regular audio if playing
+    if (currentPlayingAudio) {
+      currentPlayingAudio.pause()
+      currentPlayingAudio.currentTime = 0
+      setCurrentPlayingAudio(null)
+    }
+    
+    setCurrentTestingVoice(null)
+    setVoiceTestStates(prev => ({ ...prev, [voiceId]: 'stopped' }))
+    setPlayingStates(prev => ({ ...prev, [`voice_test_${voiceId}`]: false }))
+  }
+  
   const testLibraryVoice = async (voice: VoiceLibraryEntry) => {
+    // Stop any currently playing voice test
+    if (currentTestingVoice) {
+      stopVoiceTest(currentTestingVoice)
+    }
+    
+    // If this voice is already playing, stop it
+    if (currentTestingVoice === voice.id) {
+      return
+    }
+    
+    setCurrentTestingVoice(voice.id)
+    setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'playing' }))
+    
     const testText = `Hello! This is ${voice.name}, a ${voice.gender.toLowerCase()} voice from ${voice.nationality} with a ${voice.accent} accent. This voice is perfect for ${voice.style.join(', ')} content.`
     
     setSuccess(`🎧 Testing ${voice.name}... "${testText}"`)
     
+    // Try to get a real voice sample first
     try {
-      // Check if Web Speech API is available
-      if ('speechSynthesis' in window) {
+      console.log(`🎤 Attempting to get real voice sample for ${voice.name}...`)
+      
+      const sampleResponse = await fetch('http://localhost:8001/api/v1/voice-library-samples')
+      if (sampleResponse.ok) {
+        const sampleData = await sampleResponse.json()
+        const sampleUrl = sampleData.sample_urls[voice.id]
+        
+        if (sampleUrl) {
+          console.log(`✅ Found real voice sample for ${voice.name}: ${sampleUrl}`)
+          
+          // Play the real voice sample
+          const audio = new Audio(sampleUrl)
+          setCurrentPlayingAudio(audio)
+          setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: true }))
+          
+          audio.oncanplaythrough = () => {
+            audio.play().catch(e => console.error('Real sample play error:', e))
+            setSuccess(`🎵 Playing authentic ${voice.name} sample from ${voice.source}...`)
+          }
+          
+          audio.onended = () => {
+            setCurrentPlayingAudio(null)
+            setCurrentTestingVoice(null)
+            setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
+            setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
+            setSuccess(`✅ Authentic ${voice.name} sample complete! This is how this voice actually sounds.`)
+            setTimeout(() => setSuccess(null), 5000)
+          }
+          
+          audio.onerror = () => {
+            console.error('Real sample loading error, falling back to Web Speech API')
+            fallbackToWebSpeech()
+          }
+          
+          return // Successfully using real sample, exit here
+        }
+      }
+      
+      // If no real sample exists, try to generate one
+      if (voice.ttsConfig) {
+        console.log(`🔧 No existing sample found, attempting to generate one for ${voice.name}...`)
+        
+        const formData = new FormData()
+        formData.append('voice_id', voice.id)
+        formData.append('voice_name', voice.name)
+        formData.append('source', voice.source)
+        formData.append('text', testText)
+        formData.append('voice_config', JSON.stringify(voice.ttsConfig))
+        
+        const generateResponse = await fetch('http://localhost:8001/api/v1/generate-voice-sample', {
+          method: 'POST',
+          body: formData
+        })
+        
+        if (generateResponse.ok) {
+          const generateData = await generateResponse.json()
+          if (generateData.sample_url) {
+            console.log(`✅ Generated real voice sample for ${voice.name}: ${generateData.sample_url}`)
+            
+            // Play the newly generated sample
+            const audio = new Audio(generateData.sample_url)
+            setCurrentPlayingAudio(audio)
+            setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: true }))
+            
+            audio.oncanplaythrough = () => {
+              audio.play().catch(e => console.error('Generated sample play error:', e))
+              setSuccess(`🎵 Playing newly generated ${voice.name} sample from ${voice.source}...`)
+            }
+            
+            audio.onended = () => {
+              setCurrentPlayingAudio(null)
+              setCurrentTestingVoice(null)
+              setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
+              setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
+              setSuccess(`✅ Generated ${voice.name} sample complete! This voice has been cached for future use.`)
+              setTimeout(() => setSuccess(null), 5000)
+            }
+            
+            audio.onerror = () => {
+              console.error('Generated sample loading error, falling back to Web Speech API')
+              fallbackToWebSpeech()
+            }
+            
+            return // Successfully using generated sample, exit here
+          }
+        } else {
+          console.log(`⚠️ Failed to generate sample for ${voice.name}, falling back to Web Speech API`)
+        }
+      }
+    } catch (error) {
+      console.error('Error trying to get/generate real voice sample:', error)
+    }
+    
+    // Call fallback if we reach here
+    await fallbackToWebSpeech()
+    
+    // Fallback to Web Speech API if real sample unavailable
+    async function fallbackToWebSpeech() {
+      console.log(`🔄 Using Web Speech API fallback for ${voice.name}...`)
+      setSuccess(`🔄 Using system voice approximation for ${voice.name} (no authentic sample available yet)...`)
+      
+      try {
+        // Check if Web Speech API is available
+        if ('speechSynthesis' in window) {
         // Stop any existing speech
         window.speechSynthesis.cancel()
+        
+        // Wait a bit for voices to load if needed
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
+        // Get all available voices
+        let voices = window.speechSynthesis.getVoices()
+        
+        // If no voices loaded, wait for the voiceschanged event
+        if (voices.length === 0) {
+          await new Promise(resolve => {
+            const handleVoicesChanged = () => {
+              voices = window.speechSynthesis.getVoices()
+              if (voices.length > 0) {
+                window.speechSynthesis.removeEventListener('voiceschanged', handleVoicesChanged)
+                resolve(undefined)
+              }
+            }
+            window.speechSynthesis.addEventListener('voiceschanged', handleVoicesChanged)
+            // Fallback timeout
+            setTimeout(() => {
+              window.speechSynthesis.removeEventListener('voiceschanged', handleVoicesChanged)
+              resolve(undefined)
+            }, 1000)
+          })
+        }
+        
+        console.log(`🔍 Available voices (${voices.length}):`, voices.map(v => `${v.name} (${v.lang}) [${v.localService ? 'local' : 'remote'}]`))
         
         // Create speech synthesis utterance
         const utterance = new SpeechSynthesisUtterance(testText)
         
-        // Try to find and use the specified voice
+        // Advanced voice matching algorithm
+        let targetVoice = null
+        
         if (voice.webSpeechName) {
-          const voices = window.speechSynthesis.getVoices()
-          const targetVoice = voices.find(v => 
-            v.name.includes(voice.webSpeechName!) ||
-            v.name.toLowerCase().includes(voice.webSpeechName!.toLowerCase()) ||
-            (voice.language === 'English (US)' && v.lang === 'en-US') ||
-            (voice.language === 'English (UK)' && v.lang === 'en-GB') ||
-            (voice.language === 'French' && v.lang === 'fr-FR') ||
-            (voice.language === 'German' && v.lang === 'de-DE') ||
-            (voice.language === 'Spanish' && v.lang === 'es-ES') ||
-            (voice.language === 'Portuguese (BR)' && v.lang === 'pt-BR') ||
-            (voice.language === 'Italian' && v.lang === 'it-IT') ||
-            (voice.language === 'Japanese' && v.lang === 'ja-JP') ||
-            (voice.language === 'Chinese (Mandarin)' && v.lang === 'zh-CN') ||
-            (voice.language === 'Korean' && v.lang === 'ko-KR')
-          )
+          console.log(`🎯 Looking for voice: ${voice.webSpeechName} for ${voice.name}`)
           
-          if (targetVoice) {
-            utterance.voice = targetVoice
-            console.log(`🎵 Using voice: ${targetVoice.name} (${targetVoice.lang})`)
-          } else {
-            console.log(`⚠️ Could not find voice: ${voice.webSpeechName}, using default`)
+          // Try exact name match first
+          targetVoice = voices.find(v => v.name === voice.webSpeechName)
+          
+          if (!targetVoice) {
+            // Try partial name match
+            targetVoice = voices.find(v => 
+              v.name.toLowerCase().includes(voice.webSpeechName!.toLowerCase()) ||
+              voice.webSpeechName!.toLowerCase().includes(v.name.toLowerCase())
+            )
           }
+          
+          if (!targetVoice) {
+            // Try matching by key terms
+            const searchTerms = voice.webSpeechName.toLowerCase().split(' ')
+            targetVoice = voices.find(v => 
+              searchTerms.some(term => v.name.toLowerCase().includes(term))
+            )
+          }
+        }
+        
+        // Fallback to language and gender matching if no specific voice found
+        if (!targetVoice) {
+          console.log(`🔄 No exact match found, trying language/gender matching for ${voice.name}`)
+          
+          // Map our language format to standard language codes
+          const langMap: {[key: string]: string} = {
+            'English (US)': 'en-US',
+            'English (UK)': 'en-GB', 
+            'English (AU)': 'en-AU',
+            'English (IE)': 'en-IE',
+            'French': 'fr-FR',
+            'German': 'de-DE',
+            'Spanish': 'es-ES',
+            'Portuguese (BR)': 'pt-BR',
+            'Italian': 'it-IT',
+            'Japanese': 'ja-JP',
+            'Chinese (Mandarin)': 'zh-CN',
+            'Korean': 'ko-KR'
+          }
+          
+          const targetLang = langMap[voice.language] || 'en-US'
+          
+          // Find voices matching language
+          const languageVoices = voices.filter(v => v.lang.startsWith(targetLang.split('-')[0]))
+          console.log(`🌐 Found ${languageVoices.length} voices for language ${targetLang}:`, languageVoices.map(v => v.name))
+          
+          if (languageVoices.length > 0) {
+            // Prefer local voices over remote
+            const localVoices = languageVoices.filter(v => v.localService)
+            const voicesToSearch = localVoices.length > 0 ? localVoices : languageVoices
+            
+            // Try to match gender-specific voice names
+            if (voice.gender === 'Female') {
+              targetVoice = voicesToSearch.find(v => 
+                /female|woman|girl|she|aria|zira|hazel|susan|samantha|victoria|serena|kylie|catherine|marie|isabella|emma|jenny|libby/i.test(v.name)
+              )
+            } else if (voice.gender === 'Male') {
+              targetVoice = voicesToSearch.find(v => 
+                /male|man|boy|he|david|mark|ryan|guy|alex|brian|george|kevin|richard|carlos|riccardo|thorsten/i.test(v.name)
+              )
+            }
+            
+            // If no gender-specific match, take the first available voice
+            if (!targetVoice) {
+              targetVoice = voicesToSearch[0]
+            }
+          }
+        }
+        
+        // If still no voice found, use system default but log warning
+        if (targetVoice) {
+          utterance.voice = targetVoice
+          console.log(`✅ Selected voice: ${targetVoice.name} (${targetVoice.lang}) [${targetVoice.localService ? 'local' : 'remote'}] for ${voice.name}`)
+          setSuccess(`🎵 Testing ${voice.name} using ${targetVoice.name}...`)
+        } else {
+          console.warn(`⚠️ No suitable voice found for ${voice.name} (${voice.webSpeechName}), using system default`)
+          setSuccess(`🎵 Testing ${voice.name} with system default voice (no specific voice available)...`)
         }
         
         // Set voice parameters based on the voice characteristics
         utterance.rate = voice.style.includes('Fast') ? 1.2 : 
                         voice.style.includes('Slow') || voice.style.includes('Wise') ? 0.8 : 1.0
-        utterance.pitch = voice.gender === 'Female' ? 1.1 : 
-                         voice.gender === 'Male' ? 0.9 : 1.0
+        utterance.pitch = voice.gender === 'Female' ? 1.2 : 
+                         voice.gender === 'Male' ? 0.8 : 1.0
         utterance.volume = 0.9
+        
+        // Set language if we have a target voice
+        if (targetVoice) {
+          utterance.lang = targetVoice.lang
+        }
         
         // Handle events
         utterance.onstart = () => {
-          setSuccess(`🎵 Playing ${voice.name} voice test...`)
+          setSuccess(`🎵 Playing ${voice.name}${targetVoice ? ` (${targetVoice.name})` : ' (system default)'}...`)
+          setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: true }))
         }
         
         utterance.onend = () => {
-          setSuccess(`✅ Voice test complete for ${voice.name}! ${voice.webSpeechName ? 'Used Web Speech API.' : 'Used system default voice.'}`)
-          setTimeout(() => setSuccess(null), 4000)
+          const voiceUsed = targetVoice ? `${targetVoice.name} (${targetVoice.lang})` : 'system default'
+          setSuccess(`✅ Voice test complete for ${voice.name}! Used: ${voiceUsed}`)
+          setCurrentTestingVoice(null)
+          setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
+          setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
+          setTimeout(() => setSuccess(null), 5000)
         }
         
         utterance.onerror = (event) => {
           console.error('Speech synthesis error:', event)
           setError(`❌ Voice test failed for ${voice.name}. ${event.error || 'Unknown error occurred.'}`)
+          setCurrentTestingVoice(null)
+          setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
+          setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
           setTimeout(() => setError(null), 4000)
         }
         
@@ -1273,10 +1542,14 @@ export default function VoiceClonePage() {
         setTimeout(() => setError(null), 4000)
       }
       
-    } catch (error) {
-      console.error('Voice test error:', error)
-      setError(`❌ Failed to test ${voice.name}. Please try again.`)
-      setTimeout(() => setError(null), 4000)
+      } catch (error: any) {
+        console.error('Voice test error:', error)
+        setError(`❌ Failed to test ${voice.name}. Please try again.`)
+        setCurrentTestingVoice(null)
+        setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
+        setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
+        setTimeout(() => setError(null), 4000)
+      }
     }
   }
   
@@ -3744,6 +4017,15 @@ export default function VoiceClonePage() {
                         </div>
                       )}
                       
+                      {/* Real Sample Badge */}
+                      {availableRealSamples[voice.id] && (
+                        <div className={`absolute ${voice.featured ? 'top-10' : 'top-4'} left-4`}>
+                          <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded-full font-semibold flex items-center gap-1" title="Authentic voice sample available">
+                            🎤 Real Sample
+                          </span>
+                        </div>
+                      )}
+                      
                       {/* Favorite Button */}
                       <button
                         onClick={() => toggleFavoriteVoice(voice.id)}
@@ -3829,13 +4111,34 @@ export default function VoiceClonePage() {
                         
                         {/* Action Buttons */}
                         <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => testLibraryVoice(voice)}
-                            className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
-                          >
-                            <PlayIcon className="h-4 w-4" />
-                            Test Voice
-                          </button>
+                          <div className="flex items-center gap-1 flex-1">
+                            <button
+                              onClick={() => {
+                                if (currentTestingVoice === voice.id) {
+                                  stopVoiceTest(voice.id)
+                                } else {
+                                  testLibraryVoice(voice)
+                                }
+                              }}
+                              className={`flex-1 px-3 py-2 text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2 ${
+                                currentTestingVoice === voice.id
+                                  ? 'bg-red-600 hover:bg-red-700'
+                                  : 'bg-blue-600 hover:bg-blue-700'
+                              }`}
+                            >
+                              {currentTestingVoice === voice.id ? (
+                                <>
+                                  <StopIcon className="h-4 w-4" />
+                                  Stop Test
+                                </>
+                              ) : (
+                                <>
+                                  <PlayIcon className="h-4 w-4" />
+                                  {availableRealSamples[voice.id] ? '🎤 Test Real Voice' : 'Test Voice'}
+                                </>
+                              )}
+                            </button>
+                          </div>
                           <button
                             onClick={() => useVoiceForClone(voice)}
                             className="flex-1 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2"

@@ -52,6 +52,11 @@ const nextConfig = {
     optimizeCss: true,
     optimizePackageImports: ['framer-motion', '@heroicons/react']
   },
+  
+  // Ensure CSS is properly handled
+  poweredByHeader: false,
+  compress: true,
+  generateEtags: false,
 
   // Improve build performance
   onDemandEntries: {

@@ -479,6 +479,40 @@ class ONNXAccelerationService:
         except Exception as e:
             logger.error(f"Failed to get performance stats: {e}")
             return {"error": str(e)}
+    
+    async def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get performance metrics for health check (alias for get_performance_stats)"""
+        try:
+            stats = await self.get_performance_stats()
+            
+            # Add health status
+            if "error" in stats:
+                return {"status": "unhealthy", "error": stats["error"]}
+            
+            # Determine health status based on performance
+            gpu_available = self.device_info and self.device_info.get("cuda_available", False)
+            rtx_5090_detected = "RTX 5090" in str(self.device_info.get("gpu_name", ""))
+            
+            if gpu_available:
+                status = "healthy"
+                if rtx_5090_detected:
+                    status_detail = "RTX 5090 GPU acceleration active"
+                else:
+                    status_detail = f"GPU acceleration active ({self.device_info.get('gpu_name', 'Unknown GPU')})"
+            else:
+                status = "degraded"
+                status_detail = "CPU fallback (GPU acceleration not available)"
+            
+            return {
+                "status": status,
+                "status_detail": status_detail,
+                "device_info": self.device_info,
+                "performance_stats": stats
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get performance metrics: {e}")
+            return {"status": "unhealthy", "error": str(e)}
 
     async def convert_pytorch_to_onnx(
         self,

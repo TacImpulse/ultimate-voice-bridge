@@ -230,15 +230,19 @@ async def health_check():
         llm_healthy = await llm_service.health_check() if llm_service else False
         
         # Check GPU acceleration health
-        gpu_acceleration_healthy = True
+        gpu_acceleration_healthy = False  # Default to False
         vibevoice_gpu_healthy = True
         
         if onnx_acceleration_service:
             try:
                 gpu_metrics = await onnx_acceleration_service.get_performance_metrics()
-                gpu_acceleration_healthy = gpu_metrics.get('status') == 'healthy'
-            except:
+                gpu_acceleration_healthy = gpu_metrics.get('status') in ['healthy', 'degraded']
+                logger.info(f"🎮 GPU acceleration status: {gpu_metrics.get('status_detail', 'Unknown')}")
+            except Exception as e:
+                logger.warning(f"⚠️ GPU acceleration health check failed: {e}")
                 gpu_acceleration_healthy = False
+        else:
+            logger.info("💻 ONNX acceleration service not initialized")
         
         if vibevoice_service:
             try:
@@ -1076,6 +1080,107 @@ async def websocket_endpoint(websocket: WebSocket):
             "type": "error",
             "message": str(e)
         })
+
+
+# Voice sample endpoints
+from voice_sample_generator import voice_sample_generator
+
+# Mount voice samples directory as static files
+app.mount("/api/v1/voice-samples", StaticFiles(directory="voice_samples"), name="voice_samples")
+
+@app.get("/api/v1/voice-library-samples")
+async def get_voice_library_samples():
+    """Get voice sample URLs for the entire voice library"""
+    try:
+        # This would be the voice library data from the frontend
+        # For now, return sample URLs for existing samples
+        sample_urls = {}
+        
+        # Scan for existing voice samples
+        for source_dir in voice_sample_generator.source_dirs.values():
+            for sample_file in source_dir.glob("*.wav"):
+                # Extract voice ID from filename (voice_id_hash.wav)
+                voice_id = sample_file.stem.split('_')[0]
+                relative_path = sample_file.relative_to(voice_sample_generator.samples_dir)
+                sample_urls[voice_id] = f"http://localhost:8001/api/v1/voice-samples/{relative_path.as_posix()}"
+        
+        return {
+            "status": "success",
+            "sample_urls": sample_urls,
+            "total_samples": len(sample_urls)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting voice library samples: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get voice samples: {str(e)}")
+
+@app.post("/api/v1/generate-voice-sample")
+async def generate_voice_sample(
+    voice_id: str = Form(...),
+    voice_name: str = Form(...),
+    source: str = Form(...),
+    text: str = Form(...),
+    voice_config: str = Form("{}")  # JSON string with voice-specific config
+):
+    """Generate a voice sample for a specific voice library entry"""
+    try:
+        import json
+        
+        # Parse voice config
+        config = json.loads(voice_config) if voice_config else {}
+        config.update({
+            'id': voice_id,
+            'name': voice_name,
+            'source': source,
+            'sample_text': text
+        })
+        
+        # Generate the sample
+        sample_path = await voice_sample_generator.get_or_generate_sample(config)
+        
+        if sample_path:
+            # Return the URL to access the sample
+            sample_url = voice_sample_generator.get_sample_url(voice_id)
+            return {
+                "status": "success",
+                "sample_url": sample_url,
+                "voice_id": voice_id,
+                "sample_path": sample_path
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to generate voice sample")
+        
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid voice_config JSON")
+    except Exception as e:
+        logger.error(f"Error generating voice sample: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate voice sample: {str(e)}")
+
+@app.post("/api/v1/generate-library-samples")
+async def generate_library_samples(
+    voice_library: List[dict]
+):
+    """Generate voice samples for multiple voices in the library"""
+    try:
+        # Generate samples for all voices
+        results = await voice_sample_generator.generate_library_samples(voice_library)
+        
+        # Convert file paths to URLs
+        sample_urls = {}
+        for voice_id, sample_path in results.items():
+            if sample_path:
+                sample_urls[voice_id] = voice_sample_generator.get_sample_url(voice_id)
+        
+        return {
+            "status": "success",
+            "sample_urls": sample_urls,
+            "generated_count": len([p for p in results.values() if p]),
+            "total_requested": len(voice_library)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating library samples: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate library samples: {str(e)}")
 
 
 # Error handlers

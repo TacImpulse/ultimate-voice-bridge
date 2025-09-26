@@ -252,9 +252,20 @@ class STTService:
                 
                 # Test transcription
                 result = await self._process_audio_file(temp_file.name, "en")
-                
-                # Cleanup
+            
+            # Cleanup with retry for Windows file locking
+            try:
                 Path(temp_file.name).unlink(missing_ok=True)
+            except (OSError, PermissionError) as cleanup_error:
+                # Windows file locking issue - ignore cleanup error
+                logger.warning(f"⚠️ Cleanup warning (Windows file lock): {cleanup_error}")
+                # Try delayed cleanup
+                import time
+                time.sleep(0.1)
+                try:
+                    Path(temp_file.name).unlink(missing_ok=True)
+                except:
+                    pass  # Ignore if still locked
                 
             return True
             
