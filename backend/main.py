@@ -943,12 +943,18 @@ async def test_voice_clone(
 
 @app.get("/api/v1/voice-clones", response_model=VoiceCloneListResponse)
 async def list_voice_clones():
-    """Get list of available voice clones"""
+    """Get list of available voice clones with cached test audio information"""
     try:
         if not tts_service or not tts_service.vibevoice_service:
             raise HTTPException(status_code=503, detail="VibeVoice service not available")
         
         voice_clones = await tts_service.vibevoice_service.get_voice_clones()
+        
+        # Add cached test audio information to each voice clone
+        for clone in voice_clones:
+            voice_id = clone.get("voice_id")
+            cached_info = tts_service.vibevoice_service.get_cached_test_audio_info(voice_id)
+            clone["cached_test_audio"] = cached_info
         
         return VoiceCloneListResponse(
             status="success",
@@ -959,6 +965,52 @@ async def list_voice_clones():
     except Exception as e:
         logger.error(f"Error getting voice clones: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get voice clones: {str(e)}")
+
+
+@app.get("/api/v1/voice-clone/{voice_id}/cached-audio")
+async def get_cached_test_audio(
+    voice_id: str
+):
+    """Retrieve cached test audio for a voice clone"""
+    try:
+        if not tts_service or not tts_service.vibevoice_service:
+            raise HTTPException(status_code=503, detail="VibeVoice service not available")
+        
+        # Get cached audio info
+        cached_info = tts_service.vibevoice_service.get_cached_test_audio_info(voice_id)
+        if not cached_info:
+            raise HTTPException(status_code=404, detail="No cached test audio found for this voice clone")
+        
+        # Get the actual cached audio
+        cached_audio = tts_service.vibevoice_service._get_cached_test_audio(
+            voice_id, 
+            cached_info['text']
+        )
+        
+        if not cached_audio:
+            raise HTTPException(status_code=404, detail="Cached audio file not found")
+        
+        logger.info(f"📋 Serving cached test audio for '{voice_id}': {len(cached_audio)} bytes")
+        
+        # Return cached audio as streaming response
+        return StreamingResponse(
+            io.BytesIO(cached_audio),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f"inline; filename=voice_clone_{voice_id}_cached_test.wav",
+                "X-Voice-Clone-ID": voice_id,
+                "X-Test-Text": cached_info['text'][:100],
+                "X-Cached-Audio": "true",
+                "X-Cache-Timestamp": str(cached_info.get('tested_at', '')),
+                "Access-Control-Expose-Headers": "X-Voice-Clone-ID,X-Test-Text,X-Cached-Audio,X-Cache-Timestamp"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting cached test audio: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get cached test audio: {str(e)}")
 
 
 @app.websocket("/ws")

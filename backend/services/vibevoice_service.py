@@ -775,7 +775,7 @@ class VibeVoiceService:
             return {"error": str(e)}
     
     async def cleanup(self) -> None:
-        """Cleanup resources including GPU acceleration"""
+        """Cleanup resources including GPU acceleration and cached audio"""
         try:
             # Clean up ONNX acceleration service
             if self.onnx_acceleration:
@@ -784,15 +784,48 @@ class VibeVoiceService:
             if self.onnx_converter:
                 self.onnx_converter.cleanup()
             
+            # Clean up cached test audio files (keep voice samples and metadata)
+            self._cleanup_old_cache_files()
+            
             # Clean up temporary files
             import shutil
             if self.temp_dir.exists():
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
                 
-            logger.info("🧹 VibeVoice service cleanup complete (including GPU acceleration)")
+            logger.info("🧹 VibeVoice service cleanup complete (including GPU acceleration and audio cache)")
             
         except Exception as e:
             logger.warning(f"Cleanup warning: {e}")
+    
+    def _cleanup_old_cache_files(self, max_age_hours: int = 24) -> None:
+        """Clean up old cached test audio files"""
+        try:
+            import glob
+            import os
+            
+            # Find all cache files
+            cache_pattern = str(self.temp_dir / "*_test_*.wav")
+            cache_files = glob.glob(cache_pattern)
+            
+            current_time = time.time()
+            max_age_seconds = max_age_hours * 3600
+            cleaned_count = 0
+            
+            for cache_file in cache_files:
+                try:
+                    file_age = current_time - os.path.getmtime(cache_file)
+                    if file_age > max_age_seconds:
+                        os.unlink(cache_file)
+                        cleaned_count += 1
+                        logger.info(f"🗑️ Cleaned old cache file: {cache_file}")
+                except Exception as file_error:
+                    logger.warning(f"Failed to clean cache file {cache_file}: {file_error}")
+            
+            if cleaned_count > 0:
+                logger.info(f"🧽 Cleaned {cleaned_count} old cache files (older than {max_age_hours}h)")
+            
+        except Exception as e:
+            logger.warning(f"Failed to cleanup old cache files: {e}")
 
     async def create_conversation(
         self,
@@ -963,11 +996,19 @@ class VibeVoiceService:
     async def test_voice_clone(
         self,
         voice_id: str,
-        text: str
+        text: str,
+        cache_audio: bool = True
     ) -> bytes:
-        """Test a voice clone by generating speech"""
+        """Test a voice clone by generating speech with optional audio caching"""
         try:
             logger.info(f"🎤 Testing voice clone '{voice_id}' with text: '{text[:50]}...'")
+            
+            # Check for cached audio first (if enabled)
+            if cache_audio:
+                cached_audio = self._get_cached_test_audio(voice_id, text)
+                if cached_audio:
+                    logger.info(f"📋 Using cached test audio for '{voice_id}' ({len(cached_audio)} bytes)")
+                    return cached_audio
             
             # Debug: List available voice configs
             available_voices = list(self.voice_configs.keys())
@@ -991,6 +1032,10 @@ class VibeVoiceService:
                 voice=voice_id,
                 output_format="wav"
             )
+            
+            # Cache the generated audio (if enabled)
+            if cache_audio:
+                self._cache_test_audio(voice_id, text, audio_data)
             
             logger.info(f"✅ Voice clone test completed: {len(audio_data)} bytes generated")
             return audio_data
@@ -1059,3 +1104,110 @@ class VibeVoiceService:
         except Exception as e:
             logger.warning(f"⚠️ Text formatting failed, using original text: {e}")
             return text  # Fallback to original text
+    
+    def _get_audio_cache_key(self, voice_id: str, text: str) -> str:
+        """Generate a unique cache key for voice clone test audio"""
+        import hashlib
+        # Create hash of voice_id + text for unique identification
+        text_hash = hashlib.md5(text.encode()).hexdigest()[:8]
+        return f"{voice_id}_test_{text_hash}"
+    
+    def _get_cached_test_audio(self, voice_id: str, text: str) -> Optional[bytes]:
+        """Retrieve cached test audio if available"""
+        try:
+            cache_key = self._get_audio_cache_key(voice_id, text)
+            cache_path = self.temp_dir / f"{cache_key}.wav"
+            
+            if cache_path.exists():
+                audio_data = cache_path.read_bytes()
+                logger.info(f"📋 Cache HIT: Found cached test audio for '{voice_id}' ({len(audio_data)} bytes)")
+                return audio_data
+            else:
+                logger.info(f"📋 Cache MISS: No cached audio found for '{voice_id}'")
+                return None
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to retrieve cached audio: {e}")
+            return None
+    
+    def _cache_test_audio(self, voice_id: str, text: str, audio_data: bytes) -> None:
+        """Cache voice clone test audio for future use"""
+        try:
+            cache_key = self._get_audio_cache_key(voice_id, text)
+            cache_path = self.temp_dir / f"{cache_key}.wav"
+            
+            # Write audio data to cache file
+            cache_path.write_bytes(audio_data)
+            
+            # Also update the voice clone metadata with last test info
+            metadata_path = self.temp_dir / f"{voice_id}_metadata.json"
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                    
+                    # Add/update test audio information
+                    metadata['last_test'] = {
+                        'text': text,
+                        'cache_key': cache_key,
+                        'cache_path': str(cache_path),
+                        'audio_size': len(audio_data),
+                        'tested_at': time.time()
+                    }
+                    
+                    with open(metadata_path, 'w') as f:
+                        json.dump(metadata, f)
+                        
+                except Exception as meta_error:
+                    logger.warning(f"Failed to update metadata: {meta_error}")
+            
+            logger.info(f"📋 Cached test audio for '{voice_id}': {cache_path} ({len(audio_data)} bytes)")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to cache test audio: {e}")
+    
+    def get_cached_test_audio_info(self, voice_id: str) -> Optional[Dict[str, Any]]:
+        """Get information about cached test audio for a voice clone"""
+        try:
+            metadata_path = self.temp_dir / f"{voice_id}_metadata.json"
+            if metadata_path.exists():
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+                return metadata.get('last_test')
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to get cached audio info: {e}")
+            return None
+    
+    def clear_voice_clone_cache(self, voice_id: str) -> None:
+        """Clear all cached test audio for a specific voice clone"""
+        try:
+            # Find all cache files for this voice clone
+            pattern = f"{voice_id}_test_*.wav"
+            import glob
+            cache_files = glob.glob(str(self.temp_dir / pattern))
+            
+            for cache_file in cache_files:
+                Path(cache_file).unlink(missing_ok=True)
+                logger.info(f"🗑️ Cleared cached audio: {cache_file}")
+            
+            # Clear from metadata
+            metadata_path = self.temp_dir / f"{voice_id}_metadata.json"
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                    
+                    if 'last_test' in metadata:
+                        del metadata['last_test']
+                        
+                        with open(metadata_path, 'w') as f:
+                            json.dump(metadata, f)
+                            
+                except Exception as meta_error:
+                    logger.warning(f"Failed to clear test metadata: {meta_error}")
+            
+            logger.info(f"🧽 Cache cleared for voice clone '{voice_id}'")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to clear voice clone cache: {e}")

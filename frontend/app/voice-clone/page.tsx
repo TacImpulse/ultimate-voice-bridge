@@ -29,6 +29,13 @@ interface VoiceClone {
   quality: number
   backendId?: string  // Backend voice clone ID
   backendSynced?: boolean  // Whether this clone is synced with backend
+  cachedTestAudio?: {
+    text: string
+    audioUrl?: string
+    audioSize: number
+    testedAt: number
+    cacheKey: string
+  }  // Cached test audio information
 }
 
 interface VoiceSample {
@@ -204,12 +211,27 @@ export default function VoiceClonePage() {
               
               if (matchingBackendClone) {
                 console.log(`✅ Syncing clone "${frontendClone.name}" with backend ID: ${matchingBackendClone.voice_id}`)
+                
+                // Process cached test audio info from backend
+                let cachedTestAudio = undefined
+                if (matchingBackendClone.cached_test_audio) {
+                  cachedTestAudio = {
+                    text: matchingBackendClone.cached_test_audio.text,
+                    audioSize: matchingBackendClone.cached_test_audio.audio_size,
+                    testedAt: matchingBackendClone.cached_test_audio.tested_at,
+                    cacheKey: matchingBackendClone.cached_test_audio.cache_key,
+                    audioUrl: undefined // Will be loaded on-demand
+                  }
+                  console.log(`📋 Found cached test audio for "${frontendClone.name}": "${cachedTestAudio.text.substring(0, 50)}..."`)
+                }
+                
                 return {
                   ...frontendClone,
                   id: matchingBackendClone.voice_id, // Update to use backend ID
                   backendId: matchingBackendClone.voice_id,
                   backendSynced: true,
-                  status: 'ready' as const
+                  status: 'ready' as const,
+                  cachedTestAudio
                 }
               }
               
@@ -630,6 +652,97 @@ export default function VoiceClonePage() {
     }
   }
   
+  // Load cached test audio for a voice clone
+  const loadCachedTestAudio = async (clone: VoiceClone): Promise<string | null> => {
+    if (!clone.cachedTestAudio || !clone.backendId) {
+      return null
+    }
+    
+    try {
+      console.log(`📋 Loading cached test audio for '${clone.name}'...`)
+      const response = await fetch(`http://localhost:8001/api/v1/voice-clone/${clone.backendId}/cached-audio`)
+      
+      if (response.ok) {
+        const audioBlob = await response.blob()
+        const audioUrl = URL.createObjectURL(audioBlob)
+        
+        // Update the clone with the loaded audio URL
+        setVoiceClones(prevClones => 
+          prevClones.map(c => 
+            c.id === clone.id 
+              ? { ...c, cachedTestAudio: { ...c.cachedTestAudio!, audioUrl } }
+              : c
+          )
+        )
+        
+        console.log(`✅ Cached audio loaded: ${Math.round(audioBlob.size / 1024)}KB`)
+        return audioUrl
+      } else if (response.status === 404) {
+        console.log(`📋 No cached audio found for '${clone.name}'`)
+        // Clear the cached info since it's stale
+        setVoiceClones(prevClones => 
+          prevClones.map(c => 
+            c.id === clone.id 
+              ? { ...c, cachedTestAudio: undefined }
+              : c
+          )
+        )
+        return null
+      } else {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+    } catch (error) {
+      console.error('Failed to load cached test audio:', error)
+      return null
+    }
+  }
+  
+  // Play cached test audio
+  const playCachedTestAudio = async (clone: VoiceClone) => {
+    if (!clone.cachedTestAudio) {
+      console.log('No cached test audio available')
+      return
+    }
+    
+    let audioUrl = clone.cachedTestAudio.audioUrl
+    
+    // Load audio URL if not already loaded
+    if (!audioUrl) {
+      audioUrl = await loadCachedTestAudio(clone)
+      if (!audioUrl) {
+        setError('Failed to load cached test audio')
+        return
+      }
+    }
+    
+    // Stop any currently playing audio
+    stopAllAudio()
+    
+    // Play the cached audio
+    const audio = new Audio(audioUrl)
+    setCurrentPlayingAudio(audio)
+    setPlayingStates({ [`cached_test_${clone.id}`]: true })
+    
+    audio.oncanplaythrough = () => {
+      audio.play().catch(e => console.error('Audio play error:', e))
+    }
+    
+    audio.onended = () => {
+      setCurrentPlayingAudio(null)
+      setPlayingStates({})
+    }
+    
+    audio.onerror = () => {
+      console.error('Audio loading error for cached test audio')
+      setCurrentPlayingAudio(null)
+      setPlayingStates({})
+      setError('Failed to play cached test audio')
+    }
+    
+    const testDate = new Date(clone.cachedTestAudio.testedAt * 1000).toLocaleDateString()
+    setSuccess(`📋 Playing cached test audio from ${testDate}: "${clone.cachedTestAudio.text.substring(0, 50)}..."`)
+  }
+  
   // Test voice clone with VibeVoice
   const testVoiceClone = async (cloneParam: VoiceClone) => {
     // Always use the most current version from state to ensure we have latest backend sync
@@ -744,7 +857,31 @@ export default function VoiceClonePage() {
           setPlayingStates({})
         }
         
-        setSuccess(`🎉 Voice clone test successful! Generated ${Math.round(audioBlob.size / 1024)}KB audio for ${clone.name} using VibeVoice-Large.`)
+        // Update the clone with new cached test audio info (audio is auto-cached by backend)
+        const currentTime = Math.floor(Date.now() / 1000)
+        const updatedCachedInfo = {
+          text: testText,
+          audioUrl, // Store the current audio URL for immediate use
+          audioSize: audioBlob.size,
+          testedAt: currentTime,
+          cacheKey: `${voiceIdToUse}_test_${Math.random().toString(36).substring(7)}`
+        }
+        
+        // Update the voice clone with cached audio info
+        setVoiceClones(prevClones => 
+          prevClones.map(c => 
+            c.id === clone.id 
+              ? { ...c, cachedTestAudio: updatedCachedInfo }
+              : c
+          )
+        )
+        
+        // Update current clone if it matches
+        if (currentClone?.id === clone.id) {
+          setCurrentClone(prev => prev ? { ...prev, cachedTestAudio: updatedCachedInfo } : prev)
+        }
+        
+        setSuccess(`🎉 Voice clone test successful! Generated ${Math.round(audioBlob.size / 1024)}KB audio for ${clone.name} using VibeVoice-Large. 📋 Test audio cached for future playback.`)
         
       } else if (response.status === 404 || response.status === 500 || response.status === 503) {
         // Voice clone service not available, try fallback
@@ -2224,34 +2361,69 @@ export default function VoiceClonePage() {
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            setCurrentClone(clone)
-                            setActiveTab('create')
-                          }}
-                          className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => testVoiceClone(clone)}
-                          disabled={isProcessing || clone.samples.length === 0 || !clone.backendSynced}
-                          className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white text-sm rounded-lg transition-colors"
-                          title={
-                            !clone.backendSynced ? 'Voice clone must be synced with backend to test' :
-                            clone.samples.length === 0 ? 'Voice clone needs voice samples to test' :
-                            'Test this voice clone with VibeVoice'
-                          }
-                        >
-                          {!clone.backendSynced ? '🔄 Sync First' : 'Test'}
-                        </button>
-                        <button
-                          onClick={() => deleteVoiceClone(clone.id)}
-                          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors"
-                        >
-                          <TrashIcon className="h-4 w-4" />
-                        </button>
+                      <div className="space-y-2">
+                        {/* Cached Test Audio Section */}
+                        {clone.cachedTestAudio && (
+                          <div className="p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700/50 rounded-lg">
+                            <div className="text-xs text-blue-700 dark:text-blue-300 font-medium mb-2 flex items-center gap-2">
+                              📋 Cached Test Audio
+                              <span className="text-blue-500 dark:text-blue-400">
+                                ({new Date(clone.cachedTestAudio.testedAt * 1000).toLocaleDateString()})
+                              </span>
+                            </div>
+                            <div className="text-xs text-blue-600 dark:text-blue-400 mb-2 italic">
+                              "{clone.cachedTestAudio.text.substring(0, 60)}{clone.cachedTestAudio.text.length > 60 ? '...' : ''}"
+                            </div>
+                            <button
+                              onClick={() => playCachedTestAudio(clone)}
+                              className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
+                              title="Play the cached test audio from previous test"
+                            >
+                              {playingStates[`cached_test_${clone.id}`] ? (
+                                <>
+                                  <PauseIcon className="h-4 w-4" />
+                                  Playing Cached...
+                                </>
+                              ) : (
+                                <>
+                                  <PlayIcon className="h-4 w-4" />
+                                  🔁 Play Last Test
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
+                        
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setCurrentClone(clone)
+                              setActiveTab('create')
+                            }}
+                            className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => testVoiceClone(clone)}
+                            disabled={isProcessing || clone.samples.length === 0 || !clone.backendSynced}
+                            className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white text-sm rounded-lg transition-colors"
+                            title={
+                              !clone.backendSynced ? 'Voice clone must be synced with backend to test' :
+                              clone.samples.length === 0 ? 'Voice clone needs voice samples to test' :
+                              'Test this voice clone with VibeVoice'
+                            }
+                          >
+                            {!clone.backendSynced ? '🔄 Sync First' : clone.cachedTestAudio ? 'New Test' : 'Test'}
+                          </button>
+                          <button
+                            onClick={() => deleteVoiceClone(clone.id)}
+                            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors"
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     </motion.div>
                   ))}
