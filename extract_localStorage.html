@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Voice Clone localStorage Extractor</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .success { background: #d4edda; border-color: #c3e6cb; color: #155724; }
+        .info { background: #d1ecf1; border-color: #bee5eb; color: #0c5460; }
+        .warning { background: #fff3cd; border-color: #ffeaa7; color: #856404; }
+        .error { background: #f8d7da; border-color: #f5c6cb; color: #721c24; }
+        textarea { width: 100%; height: 200px; font-family: monospace; font-size: 12px; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+        button:hover { background: #0056b3; }
+        .download-btn { background: #28a745; }
+        .download-btn:hover { background: #1e7e34; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 10px 0; }
+        .stat-item { background: #e9ecef; padding: 10px; border-radius: 4px; text-align: center; }
+        .stat-number { font-size: 24px; font-weight: bold; color: #007bff; }
+        .stat-label { font-size: 14px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Voice Clone localStorage Extractor</h1>
+        <p>This tool will help you extract voice clone data from your browser's localStorage and prepare it for restoration.</p>
+
+        <div id="status" class="section info">
+            <strong>Status:</strong> Ready to extract data
+        </div>
+
+        <div class="section">
+            <h3>Step 1: Extract localStorage Data</h3>
+            <button onclick="extractData()">🔍 Extract Voice Clone Data</button>
+            <button onclick="showRawData()">📋 Show Raw localStorage</button>
+        </div>
+
+        <div id="dataSection" class="section" style="display: none;">
+            <h3>Step 2: Voice Clone Summary</h3>
+            <div id="summary"></div>
+            <div id="stats" class="stats"></div>
+        </div>
+
+        <div id="downloadSection" class="section" style="display: none;">
+            <h3>Step 3: Download Backup</h3>
+            <p>Save this data to use with the restoration tool:</p>
+            <button class="download-btn" onclick="downloadBackup()">💾 Download voice-clones-backup.json</button>
+            <button onclick="copyToClipboard()">📋 Copy to Clipboard</button>
+        </div>
+
+        <div id="rawSection" class="section" style="display: none;">
+            <h3>Raw localStorage Data</h3>
+            <textarea id="rawData" readonly></textarea>
+        </div>
+
+        <div id="instructionsSection" class="section info">
+            <h3>Next Steps</h3>
+            <ol>
+                <li>Extract the voice clone data above</li>
+                <li>Download the backup file</li>
+                <li>Run the Python restoration tool: <code>python restore_voice_clones.py</code></li>
+                <li>When prompted, provide the path to your downloaded backup file</li>
+                <li>Follow the generated restoration instructions</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        let extractedData = null;
+
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `section ${type}`;
+            statusDiv.innerHTML = `<strong>Status:</strong> ${message}`;
+        }
+
+        function extractData() {
+            try {
+                const voiceClones = localStorage.getItem('voice-clones');
+                
+                if (!voiceClones) {
+                    updateStatus('No voice clone data found in localStorage. Make sure you\'re on the correct website.', 'warning');
+                    return;
+                }
+
+                const parsed = JSON.parse(voiceClones);
+                extractedData = parsed;
+                
+                displaySummary(parsed);
+                updateStatus(`Successfully extracted data for ${parsed.length} voice clones!`, 'success');
+                
+                document.getElementById('dataSection').style.display = 'block';
+                document.getElementById('downloadSection').style.display = 'block';
+                
+            } catch (error) {
+                updateStatus(`Error extracting data: ${error.message}`, 'error');
+                console.error('Extraction error:', error);
+            }
+        }
+
+        function displaySummary(clones) {
+            const summaryDiv = document.getElementById('summary');
+            const statsDiv = document.getElementById('stats');
+            
+            let summary = '<h4>Found Voice Clones:</h4><ul>';
+            let totalSamples = 0;
+            let totalDuration = 0;
+            let backendSynced = 0;
+            
+            clones.forEach((clone, index) => {
+                const sampleCount = clone.samples ? clone.samples.length : 0;
+                const cloneDuration = clone.samples ? clone.samples.reduce((total, sample) => total + (sample.duration || 0), 0) : 0;
+                
+                totalSamples += sampleCount;
+                totalDuration += cloneDuration;
+                
+                if (clone.backendSynced) backendSynced++;
+                
+                summary += `<li><strong>${clone.name}</strong> - ${sampleCount} samples (${cloneDuration.toFixed(1)}s total)`;
+                if (clone.backendSynced) summary += ' ✅ Synced';
+                if (clone.status) summary += ` [${clone.status}]`;
+                summary += '</li>';
+            });
+            
+            summary += '</ul>';
+            summaryDiv.innerHTML = summary;
+            
+            // Display stats
+            statsDiv.innerHTML = `
+                <div class="stat-item">
+                    <div class="stat-number">${clones.length}</div>
+                    <div class="stat-label">Voice Clones</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">${totalSamples}</div>
+                    <div class="stat-label">Total Samples</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">${totalDuration.toFixed(1)}s</div>
+                    <div class="stat-label">Total Duration</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">${backendSynced}</div>
+                    <div class="stat-label">Backend Synced</div>
+                </div>
+            `;
+        }
+
+        function showRawData() {
+            try {
+                const voiceClones = localStorage.getItem('voice-clones');
+                const rawDataTextarea = document.getElementById('rawData');
+                
+                if (!voiceClones) {
+                    rawDataTextarea.value = 'No voice-clones data found in localStorage';
+                } else {
+                    // Pretty print the JSON
+                    const parsed = JSON.parse(voiceClones);
+                    rawDataTextarea.value = JSON.stringify(parsed, null, 2);
+                }
+                
+                document.getElementById('rawSection').style.display = 'block';
+                
+            } catch (error) {
+                document.getElementById('rawData').value = `Error: ${error.message}\n\nRaw data:\n${localStorage.getItem('voice-clones') || 'null'}`;
+                document.getElementById('rawSection').style.display = 'block';
+            }
+        }
+
+        function downloadBackup() {
+            if (!extractedData) {
+                updateStatus('No data to download. Extract data first.', 'error');
+                return;
+            }
+            
+            try {
+                const dataStr = JSON.stringify(extractedData, null, 2);
+                const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(dataBlob);
+                link.download = `voice-clones-backup-${new Date().toISOString().split('T')[0]}.json`;
+                link.click();
+                
+                updateStatus('Backup downloaded successfully!', 'success');
+                
+            } catch (error) {
+                updateStatus(`Download error: ${error.message}`, 'error');
+            }
+        }
+
+        function copyToClipboard() {
+            if (!extractedData) {
+                updateStatus('No data to copy. Extract data first.', 'error');
+                return;
+            }
+            
+            try {
+                const dataStr = JSON.stringify(extractedData, null, 2);
+                navigator.clipboard.writeText(dataStr).then(() => {
+                    updateStatus('Data copied to clipboard!', 'success');
+                }).catch(err => {
+                    // Fallback for older browsers
+                    const textArea = document.createElement('textarea');
+                    textArea.value = dataStr;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    updateStatus('Data copied to clipboard!', 'success');
+                });
+                
+            } catch (error) {
+                updateStatus(`Copy error: ${error.message}`, 'error');
+            }
+        }
+
+        // Auto-extract data when page loads if available
+        window.addEventListener('load', () => {
+            const voiceClones = localStorage.getItem('voice-clones');
+            if (voiceClones) {
+                updateStatus('Voice clone data detected! Click "Extract Voice Clone Data" to begin.', 'info');
+            } else {
+                updateStatus('No voice clone data found. Make sure you are on the correct website (localhost:3000) and have voice clones.', 'warning');
+            }
+        });
+    </script>
+</body>
+</html>

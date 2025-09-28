@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Voice Clone Bookmarklet</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .bookmarklet { 
+            display: inline-block; 
+            background: #007bff; 
+            color: white; 
+            padding: 10px 20px; 
+            text-decoration: none; 
+            border-radius: 5px; 
+            margin: 10px 0;
+        }
+        code { background: #f8f9fa; padding: 2px 5px; border-radius: 3px; }
+        .instructions { background: #e9ecef; padding: 15px; border-radius: 5px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Voice Clone Extractor - Bookmarklet Version</h1>
+    
+    <div class="instructions">
+        <h3>Instructions:</h3>
+        <ol>
+            <li><strong>Drag the blue button below to your browser's bookmark bar</strong></li>
+            <li><strong>Go to localhost:3000</strong> (your frontend)</li>
+            <li><strong>Click the bookmark</strong> you just created</li>
+            <li>It will show a popup with your voice clone data</li>
+        </ol>
+    </div>
+    
+    <p><strong>Drag this to your bookmarks bar:</strong></p>
+    <a href="javascript:(function(){try{const d=localStorage.getItem('voice-clones');if(!d){alert('No voice clone data found in localStorage.\nMake sure you are on localhost:3000');return;}const p=JSON.parse(d);let summary='Found '+p.length+' voice clones:\n\n';p.forEach((c,i)=>{const sc=c.samples?c.samples.length:0;const cd=c.samples?c.samples.reduce((t,s)=>t+(s.duration||0),0):0;summary+=`${i+1}. ${c.name} - ${sc} samples (${cd.toFixed(1)}s)\n`;});const download=confirm(summary+'\nClick OK to download backup file, or Cancel to just copy to clipboard.');if(download){const blob=new Blob([JSON.stringify(p,null,2)],{type:'application/json'});const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download='voice-clones-backup.json';link.click();}else{navigator.clipboard.writeText(JSON.stringify(p,null,2)).then(()=>alert('Data copied to clipboard!'));}}catch(e){alert('Error: '+e.message);}})();" class="bookmarklet">🎤 Extract Voice Clones</a>
+    
+    <div class="instructions">
+        <h3>Can't drag? Try this:</h3>
+        <ol>
+            <li><strong>Right-click the blue button</strong> above</li>
+            <li><strong>Select "Copy link address"</strong></li>
+            <li><strong>Create a new bookmark manually:</strong>
+                <ul>
+                    <li>Ctrl+Shift+O (Bookmark Manager)</li>
+                    <li>Add new bookmark</li>
+                    <li>Name: <code>Extract Voice Clones</code></li>
+                    <li>URL: Paste the copied link</li>
+                </ul>
+            </li>
+        </ol>
+    </div>
+    
+    <div class="instructions">
+        <h3>Still having trouble?</h3>
+        <p>Try the <strong>manual console method</strong>:</p>
+        <ol>
+            <li>Go to localhost:3000</li>
+            <li>Press F12</li>
+            <li>Type just this: <code>localStorage.getItem('voice-clones')</code></li>
+            <li>Tell me what it shows!</li>
+        </ol>
+    </div>
+</body>
+</html>

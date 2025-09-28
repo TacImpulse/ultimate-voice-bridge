@@ -161,6 +161,9 @@ class VibeVoiceService:
                 description="Confident male voice, ideal for narration"
             )
         })
+        
+        # Load existing voice clones from temp directory
+        self._load_existing_voice_clones()
         # Optionally add the large model if available
         if self._large_model_available():
             self.voice_configs.update({
@@ -206,6 +209,72 @@ class VibeVoiceService:
                 description="Natural, highly expressive voice"
             ),
         })
+
+    def _load_existing_voice_clones(self):
+        """Load existing voice clones from temp directory at startup"""
+        try:
+            if not self.temp_dir.exists():
+                logger.info("📂 Voice clone temp directory doesn't exist yet")
+                return
+            
+            # Find all metadata files
+            metadata_files = list(self.temp_dir.glob("voice_clone_*_metadata.json"))
+            
+            if not metadata_files:
+                logger.info("📋 No existing voice clones found")
+                return
+            
+            loaded_count = 0
+            
+            for metadata_file in metadata_files:
+                try:
+                    # Extract voice_id from filename
+                    voice_id = metadata_file.stem.replace('_metadata', '')
+                    
+                    # Load metadata
+                    with open(metadata_file, 'r') as f:
+                        metadata = json.load(f)
+                    
+                    # Check if audio file exists
+                    audio_file = self.temp_dir / f"{voice_id}.wav"
+                    if not audio_file.exists():
+                        logger.warning(f"⚠️ Audio file missing for {voice_id}: {audio_file}")
+                        continue
+                    
+                    # Choose engine/model path based on availability
+                    if self._large_model_available():
+                        chosen_engine = TTSEngine.VIBEVOICE_7B
+                        chosen_model_path = self._get_large_model_path()
+                        chosen_quality = "ultra"
+                    else:
+                        chosen_engine = TTSEngine.VIBEVOICE_1_5B
+                        chosen_model_path = "vibevoice/VibeVoice-1.5B"
+                        chosen_quality = "high"
+                    
+                    # Create voice configuration
+                    voice_config = VoiceConfig(
+                        name=metadata.get("name", "Unknown Clone"),
+                        engine=chosen_engine,
+                        model_path=chosen_model_path,
+                        voice_sample=str(audio_file),
+                        description=metadata.get("description", f"Custom voice clone"),
+                        quality=chosen_quality
+                    )
+                    
+                    # Add to voice configurations
+                    self.voice_configs[voice_id] = voice_config
+                    loaded_count += 1
+                    
+                    logger.info(f"✅ Loaded voice clone: {voice_config.name} ({voice_id})")
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to load voice clone {metadata_file}: {e}")
+                    continue
+            
+            logger.info(f"📋 Loaded {loaded_count} existing voice clones at startup")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to load existing voice clones: {e}")
 
     async def initialize(self) -> None:
         """Initialize the TTS service with RTX 5090 GPU acceleration"""
@@ -320,11 +389,11 @@ class VibeVoiceService:
             
             voice_config = self.voice_configs[voice]
             
-            # CRITICAL: Auto-format text for voice clones and VibeVoice engines
-            processed_text = text
+            # CRITICAL: Clean markdown and format text for voice clones and VibeVoice engines
+            processed_text = self._clean_markdown_for_tts(text)
             if (voice.startswith('voice_clone_') or 
                 voice_config.engine in [TTSEngine.VIBEVOICE_1_5B, TTSEngine.VIBEVOICE_7B]):
-                processed_text = self._format_text_for_vibevoice(text, voice)
+                processed_text = self._format_text_for_vibevoice(processed_text, voice)
             
             # Auto-detect multi-speaker if not specified (use processed text)
             if multi_speaker is None:
@@ -435,18 +504,55 @@ class VibeVoiceService:
             model.eval()
             model.set_ddpm_inference_steps(num_steps=10)
             
-            # Prepare voice samples (use custom voice sample if available)
-            if request.voice_config.voice_sample and Path(request.voice_config.voice_sample).exists():
-                voice_samples = [request.voice_config.voice_sample]
-                logger.info(f"🎤 Using custom voice sample: {request.voice_config.voice_sample}")
+            # Prepare voice samples - handle multi-speaker scenarios
+            voice_samples = []
+            
+            if request.multi_speaker and request.speaker_mapping:
+                logger.info(f"🎤 Multi-speaker mode: Setting up voice samples for {len(request.speaker_mapping)} speakers")
+                
+                # For multi-speaker, we need voice samples for all speakers in the mapping
+                for speaker_tag, voice_id in request.speaker_mapping.items():
+                    if voice_id in self.voice_configs:
+                        voice_config = self.voice_configs[voice_id]
+                        
+                        if voice_config.voice_sample and Path(voice_config.voice_sample).exists():
+                            voice_samples.append(voice_config.voice_sample)
+                            logger.info(f"🎤 Speaker '{speaker_tag}' -> voice sample: {voice_config.voice_sample}")
+                        else:
+                            # Use default voice sample for this speaker/voice
+                            default_sample = self._get_default_voice_sample(voice_config.name)
+                            if default_sample:
+                                voice_samples.append(default_sample)
+                                logger.info(f"🎤 Speaker '{speaker_tag}' -> default sample: {default_sample}")
+                    else:
+                        logger.warning(f"⚠️ Voice ID '{voice_id}' not found for speaker '{speaker_tag}'")
+                
+                if not voice_samples:
+                    # Fallback to default voice samples if none found
+                    logger.warning("⚠️ No valid voice samples found for multi-speaker, using defaults")
+                    voice_samples = [self._get_default_voice_sample("Alice"), self._get_default_voice_sample("Andrew")]
+                    
             else:
-                voice_samples = [self._get_default_voice_sample(request.voice_config.name)]
-                logger.info(f"🎤 Using default voice sample for: {request.voice_config.name}")
+                # Single speaker mode - use the primary voice sample
+                if request.voice_config.voice_sample and Path(request.voice_config.voice_sample).exists():
+                    voice_samples = [request.voice_config.voice_sample]
+                    logger.info(f"🎤 Single-speaker: Using custom voice sample: {request.voice_config.voice_sample}")
+                else:
+                    voice_samples = [self._get_default_voice_sample(request.voice_config.name)]
+                    logger.info(f"🎤 Single-speaker: Using default voice sample for: {request.voice_config.name}")
+            
+            # Validate that we have at least one valid voice sample
+            valid_voice_samples = [vs for vs in voice_samples if vs and Path(vs).exists()]
+            if not valid_voice_samples:
+                logger.warning("⚠️ No valid voice samples found, using Alice as fallback")
+                valid_voice_samples = [self._get_default_voice_sample("Alice")]
+            
+            logger.info(f"🎤 Final voice samples ({len(valid_voice_samples)}): {[Path(vs).name for vs in valid_voice_samples]}")
             
             # Process text and generate
             inputs = processor(
                 text=[request.text],
-                voice_samples=[voice_samples],
+                voice_samples=[valid_voice_samples],  # Use validated voice samples
                 padding=True,
                 return_tensors="pt",
                 return_attention_mask=True,
@@ -1091,19 +1197,66 @@ class VibeVoiceService:
             # Check if text already has speaker annotations
             import re
             if re.search(r'^(Speaker \d+|\[S\d+\])\s*:', cleaned_text, re.IGNORECASE | re.MULTILINE):
-                logger.info("📝 Text already has speaker annotations")
+                logger.info("📝 Text already has multi-speaker annotations - preserving original format")
                 return cleaned_text
             
-            # Add Speaker 0 annotation (VibeVoice standard format)
-            # Use Speaker 0 for single-speaker voice clones
+            # For single-speaker text (no existing speaker annotations), add Speaker 0
+            # This handles voice clone testing and single-speaker generation
             formatted_text = f"Speaker 0: {cleaned_text}"
             
-            logger.info(f"✨ Formatted text for VibeVoice: Original='{text[:30]}...' -> Formatted='{formatted_text[:50]}...'")
+            logger.info(f"✨ Formatted single-speaker text: Original='{text[:30]}...' -> Formatted='{formatted_text[:50]}...'")
             return formatted_text
             
         except Exception as e:
             logger.warning(f"⚠️ Text formatting failed, using original text: {e}")
             return text  # Fallback to original text
+    
+    def _clean_markdown_for_tts(self, text: str) -> str:
+        """Clean markdown formatting and other artifacts that get read aloud by TTS engines"""
+        import re
+        
+        # Clean text step by step
+        cleaned_text = text
+        
+        # Remove markdown emphasis (bold, italic)
+        cleaned_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', cleaned_text)  # **bold** -> bold
+        cleaned_text = re.sub(r'\*([^*]+)\*', r'\1', cleaned_text)      # *italic* -> italic
+        cleaned_text = re.sub(r'__([^_]+)__', r'\1', cleaned_text)      # __bold__ -> bold
+        cleaned_text = re.sub(r'_([^_]+)_', r'\1', cleaned_text)        # _italic_ -> italic
+        
+        # Remove markdown headers
+        cleaned_text = re.sub(r'^#{1,6}\s+', '', cleaned_text, flags=re.MULTILINE)  # ### Header -> Header
+        
+        # Remove markdown links but keep the text
+        cleaned_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned_text)  # [text](url) -> text
+        
+        # Remove markdown code blocks and inline code
+        cleaned_text = re.sub(r'```[^`]*```', '', cleaned_text, flags=re.DOTALL)  # ```code``` -> 
+        cleaned_text = re.sub(r'`([^`]+)`', r'\1', cleaned_text)        # `code` -> code
+        
+        # Remove list markers
+        cleaned_text = re.sub(r'^\s*[-*+]\s+', '', cleaned_text, flags=re.MULTILINE)  # - item -> item
+        cleaned_text = re.sub(r'^\s*\d+\.\s+', '', cleaned_text, flags=re.MULTILINE) # 1. item -> item
+        
+        # Remove blockquotes
+        cleaned_text = re.sub(r'^>\s+', '', cleaned_text, flags=re.MULTILINE)  # > quote -> quote
+        
+        # Remove horizontal rules
+        cleaned_text = re.sub(r'^[-*_]{3,}$', '', cleaned_text, flags=re.MULTILINE)
+        
+        # Remove HTML tags if any
+        cleaned_text = re.sub(r'<[^>]+>', '', cleaned_text)
+        
+        # Clean up extra whitespace
+        cleaned_text = re.sub(r'\n\s*\n', ' ', cleaned_text)  # Multiple newlines -> space
+        cleaned_text = re.sub(r'\s+', ' ', cleaned_text)       # Multiple spaces -> single space
+        cleaned_text = cleaned_text.strip()
+        
+        # Log if significant cleaning occurred
+        if len(text) != len(cleaned_text) or text != cleaned_text:
+            logger.info(f"🧼 VibeVoice markdown cleaning: '{text[:40]}...' -> '{cleaned_text[:40]}...'")
+        
+        return cleaned_text
     
     def _get_audio_cache_key(self, voice_id: str, text: str) -> str:
         """Generate a unique cache key for voice clone test audio"""

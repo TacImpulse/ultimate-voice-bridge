@@ -23,6 +23,7 @@ from services.stt_service import STTService
 from services.tts_service import TTSService
 from services.llm_service import LLMService
 from services.vibevoice_service import VibeVoiceService
+from services.conversation_engine import ConversationEngine, ConversationStyle, EmotionType
 
 # RTX 5090 GPU Acceleration imports
 try:
@@ -71,6 +72,7 @@ tts_service: TTSService = None
 llm_service: LLMService = None
 vibevoice_service: VibeVoiceService = None
 onnx_acceleration_service: ONNXAccelerationService = None
+conversation_engine: ConversationEngine = None
 websocket_manager = WebSocketManager()
 
 
@@ -80,7 +82,7 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting Ultimate Voice Bridge...")
     
-    global stt_service, tts_service, llm_service, vibevoice_service, onnx_acceleration_service
+    global stt_service, tts_service, llm_service, vibevoice_service, onnx_acceleration_service, conversation_engine
     
     # Initialize services
     try:
@@ -108,6 +110,10 @@ async def lifespan(app: FastAPI):
                 vibevoice_service = VibeVoiceService()
                 await vibevoice_service.initialize()
                 logger.info("✅ VibeVoice with GPU Acceleration initialized")
+                
+                # Initialize ConversationEngine with VibeVoice
+                conversation_engine = ConversationEngine(vibevoice_service)
+                logger.info("✅ Multi-Speaker Conversation Engine initialized")
                 
                 # Log GPU info
                 if onnx_acceleration_service.device_info:
@@ -213,6 +219,11 @@ async def root():
             "voice_clone": "/api/v1/voice-clone",
             "voice_clone_test": "/api/v1/voice-clone/test",
             "voice_clones_list": "/api/v1/voice-clones",
+            "conversation_create": "/api/v1/conversation/create",
+            "conversation_styles": "/api/v1/conversation/styles",
+            "conversation_emotions": "/api/v1/conversation/emotions",
+            "conversation_analytics": "/api/v1/conversation/analytics",
+            "conversation_clear_history": "/api/v1/conversation/clear-history",
             "websocket": "/ws",
             "docs": "/docs"
         },
@@ -326,6 +337,79 @@ async def text_to_speech(request: TTSRequest):
     except Exception as e:
         logger.error(f"TTS error: {e}")
         raise HTTPException(status_code=500, detail=f"Speech generation failed: {str(e)}")
+
+
+# Voice test endpoint request model
+class VoiceTestRequest(BaseModel):
+    text: str = Field(..., description="Text to synthesize for testing")
+    voice_id: str = Field(..., description="Voice ID to test")
+    speaker_name: str = Field(default="Test Speaker", description="Speaker name for testing")
+
+
+@app.post("/api/v1/tts/test-voice")
+async def test_voice(request: VoiceTestRequest):
+    """Test a specific voice with given text - supports both VibeVoice and custom voice clones"""
+    try:
+        logger.info(f"🎤 Testing voice: {request.voice_id} for speaker: {request.speaker_name}")
+        logger.info(f"📝 Test text: '{request.text[:100]}{'...' if len(request.text) > 100 else ''}'")
+        
+        # Check if it's a VibeVoice voice (vibevoice- prefix)
+        if request.voice_id.startswith('vibevoice-'):
+            # Use VibeVoice service if available
+            if vibevoice_service:
+                logger.info(f"🎵 Using VibeVoice service for voice: {request.voice_id}")
+                
+                # Create a simple single-speaker conversation for testing
+                test_script = f"{request.speaker_name}: {request.text}"
+                speaker_mapping = {request.speaker_name: request.voice_id}
+                
+                # Generate audio using VibeVoice
+                audio_data = await vibevoice_service.generate_conversation(
+                    script=test_script,
+                    speaker_mapping=speaker_mapping,
+                    conversation_style="natural"
+                )
+                
+                logger.info(f"✅ VibeVoice test audio generated: {len(audio_data)} bytes")
+                
+                return StreamingResponse(
+                    io.BytesIO(audio_data),
+                    media_type="audio/wav",
+                    headers={
+                        "Content-Disposition": f"inline; filename=voice_test_{request.voice_id}.wav",
+                        "X-Voice-ID": request.voice_id,
+                        "X-Speaker-Name": request.speaker_name,
+                        "X-Voice-Engine": "VibeVoice"
+                    }
+                )
+            else:
+                logger.warning("⚠️ VibeVoice service not available, falling back to regular TTS")
+        
+        # Fallback to regular TTS service for other voices or if VibeVoice fails
+        logger.info(f"🎵 Using standard TTS service for voice: {request.voice_id}")
+        
+        # Generate speech using standard TTS service
+        audio_data = await tts_service.generate_speech(
+            text=request.text,
+            voice=request.voice_id
+        )
+        
+        logger.info(f"✅ Standard TTS test audio generated: {len(audio_data)} bytes")
+        
+        return StreamingResponse(
+            io.BytesIO(audio_data),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f"inline; filename=voice_test_{request.voice_id}.wav",
+                "X-Voice-ID": request.voice_id,
+                "X-Speaker-Name": request.speaker_name,
+                "X-Voice-Engine": "Standard TTS"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Voice test error for {request.voice_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Voice test failed: {str(e)}")
 
 
 @app.post("/api/v1/llm", response_model=LLMResponse)
@@ -1015,6 +1099,178 @@ async def get_cached_test_audio(
     except Exception as e:
         logger.error(f"Error getting cached test audio: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get cached test audio: {str(e)}")
+
+
+# Multi-Speaker Conversation Engine Endpoints
+
+@app.post("/api/v1/conversation/create")
+async def create_dynamic_conversation(
+    script: str = Form(..., description="Conversation script with speaker indicators"),
+    speaker_mapping: str = Form(..., description="JSON string mapping speaker names to voice IDs"),
+    conversation_style: str = Form(default="natural", description="Conversation style (natural, interview, debate, etc.)"),
+    add_natural_interactions: bool = Form(default=True, description="Add interruptions and natural reactions"),
+    include_background_sound: bool = Form(default=False, description="Include ambient background sounds"),
+    background_sound_volume: int = Form(default=50, description="Background sound volume (10-100)"),
+    emotional_intelligence: bool = Form(default=True, description="Enable emotion detection and response")
+):
+    """Create advanced multi-speaker conversation with emotion detection and natural speech patterns"""
+    try:
+        if not conversation_engine:
+            raise HTTPException(status_code=503, detail="ConversationEngine service not available")
+        
+        # Parse speaker mapping JSON
+        import json
+        try:
+            speaker_map = json.loads(speaker_mapping)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid speaker_mapping JSON: {e}")
+        
+        # Convert style string to enum
+        try:
+            style = ConversationStyle(conversation_style.lower())
+        except ValueError:
+            available_styles = [s.value for s in ConversationStyle]
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid conversation_style '{conversation_style}'. Available: {available_styles}"
+            )
+        
+        logger.info(f"🎭 Creating dynamic conversation: style={style.value}, speakers={list(speaker_map.keys())}")
+        
+        # Create conversation
+        audio_data, metadata = await conversation_engine.create_dynamic_conversation(
+            script=script,
+            speaker_mapping=speaker_map,
+            conversation_style=style,
+            add_natural_interactions=add_natural_interactions,
+            include_background_sound=include_background_sound,
+            background_sound_volume=background_sound_volume,
+            emotional_intelligence=emotional_intelligence
+        )
+        
+        # Convert emotion distribution to JSON-serializable format
+        emotion_dist_json = {emotion.value: score for emotion, score in metadata.emotion_distribution.items()}
+        
+        # Return audio as streaming response with detailed metadata
+        return StreamingResponse(
+            io.BytesIO(audio_data),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": "attachment; filename=dynamic_conversation.wav",
+                "X-Conversation-Duration": str(metadata.total_duration),
+                "X-Speaker-Count": str(metadata.speaker_count),
+                "X-Word-Count": str(metadata.word_count),
+                "X-Interaction-Complexity": str(metadata.interaction_complexity),
+                "X-Emotion-Distribution": json.dumps(emotion_dist_json),
+                "X-Conversation-Style": style.value,
+                "Access-Control-Expose-Headers": "X-Conversation-Duration,X-Speaker-Count,X-Word-Count,X-Interaction-Complexity,X-Emotion-Distribution,X-Conversation-Style"
+            }
+        )
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        logger.error(f"❌ Dynamic conversation creation failed: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Dynamic conversation creation failed: {str(e)}")
+
+@app.get("/api/v1/conversation/styles")
+async def get_conversation_styles():
+    """Get available conversation styles with descriptions"""
+    style_descriptions = {
+        "natural": "Realistic everyday conversation with natural pauses and interruptions",
+        "interview": "Structured Q&A format with longer thoughtful pauses between speakers",
+        "debate": "Fast-paced argumentative style with quick responses and overlapping speech", 
+        "podcast": "Professional broadcasting style with clear pacing and smooth transitions",
+        "casual": "Informal chat with frequent interruptions and casual reactions",
+        "formal": "Business or academic presentation style with structured speech patterns",
+        "dramatic": "Theatrical performance with emotional emphasis and dramatic pauses"
+    }
+    
+    return {
+        "status": "success",
+        "styles": [
+            {
+                "value": style.value,
+                "name": style.value.title().replace('_', ' '),
+                "description": style_descriptions.get(style.value, "")
+            }
+            for style in ConversationStyle
+        ],
+        "total_styles": len(ConversationStyle)
+    }
+
+@app.get("/api/v1/conversation/emotions")
+async def get_supported_emotions():
+    """Get supported emotion types for voice generation"""
+    emotion_descriptions = {
+        "neutral": "Normal speaking tone without emotional coloring",
+        "happy": "Cheerful and upbeat with positive energy",
+        "excited": "Energetic and enthusiastic with high energy", 
+        "sad": "Melancholy and subdued with lower energy",
+        "angry": "Aggressive and intense with forceful delivery",
+        "surprised": "Shocked and amazed with sudden emphasis",
+        "confused": "Uncertain and questioning with hesitant delivery",
+        "confident": "Assured and authoritative with clear conviction",
+        "nervous": "Anxious and hesitant with tentative speech patterns",
+        "whispering": "Quiet and secretive with intimate delivery"
+    }
+    
+    return {
+        "status": "success",
+        "emotions": [
+            {
+                "value": emotion.value,
+                "name": emotion.value.title(),
+                "description": emotion_descriptions.get(emotion.value, "")
+            }
+            for emotion in EmotionType
+        ],
+        "total_emotions": len(EmotionType)
+    }
+
+@app.get("/api/v1/conversation/analytics")
+async def get_conversation_analytics():
+    """Get conversation generation analytics and performance statistics"""
+    try:
+        if not conversation_engine:
+            raise HTTPException(status_code=503, detail="ConversationEngine service not available")
+            
+        analytics = await conversation_engine.get_conversation_analytics()
+        
+        return {
+            "status": "success",
+            "analytics": analytics,
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get conversation analytics: {e}")
+        raise HTTPException(status_code=500, detail=f"Analytics retrieval failed: {str(e)}")
+
+@app.post("/api/v1/conversation/clear-history")
+async def clear_conversation_history():
+    """Clear conversation history and reset analytics data"""
+    try:
+        if not conversation_engine:
+            raise HTTPException(status_code=503, detail="ConversationEngine service not available")
+            
+        conversation_engine.clear_conversation_history()
+        
+        return {
+            "status": "success",
+            "message": "Conversation history cleared successfully",
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to clear conversation history: {e}")
+        raise HTTPException(status_code=500, detail=f"History clearing failed: {str(e)}")
 
 
 @app.websocket("/ws")

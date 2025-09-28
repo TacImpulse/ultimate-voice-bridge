@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import './voice-clone.css'
 import { 
@@ -16,6 +16,7 @@ import {
   CheckCircleIcon,
   UserIcon,
   CloudArrowUpIcon,
+  ArrowUpTrayIcon,
   XMarkIcon,
   MagnifyingGlassIcon,
   HeartIcon,
@@ -33,12 +34,14 @@ interface VoiceClone {
   quality: number
   backendId?: string  // Backend voice clone ID
   backendSynced?: boolean  // Whether this clone is synced with backend
+  customTestText?: string  // User's preferred test text for this clone
   cachedTestAudio?: {
     text: string
     audioUrl?: string
     audioSize: number
     testedAt: number
     cacheKey: string
+    isCustomText?: boolean  // Whether this was from custom test text
   }  // Cached test audio information
 }
 
@@ -81,7 +84,33 @@ interface VoiceLibraryEntry {
   tags: string[]
   featured: boolean
   webSpeechName?: string // For Web Speech API compatibility
+  ttsConfig?: {
+    provider?: string
+    voice_name?: string
+    rate?: number
+    pitch?: number
+    ms_voice_name?: string
+    system_voice_name?: string
+  }
 }
+
+// Mock voices for fallback when API is unavailable
+const mockVoices: AvailableVoice[] = [
+  {
+    id: 'mock_voice_1',
+    name: 'Mock Voice 1',
+    language: 'English (US)',
+    gender: 'Female',
+    description: 'Mock voice for development'
+  },
+  {
+    id: 'mock_voice_2', 
+    name: 'Mock Voice 2',
+    language: 'English (US)',
+    gender: 'Male',
+    description: 'Mock voice for development'
+  }
+]
 
 export default function VoiceClonePage() {
   // Voice clone management
@@ -114,6 +143,15 @@ export default function VoiceClonePage() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [showNewCloneModal, setShowNewCloneModal] = useState(false)
   
+  // Custom test text state
+  const [customTestText, setCustomTestText] = useState('')
+  const [showCustomTestInput, setShowCustomTestInput] = useState(false)
+  const [isSTTForTest, setIsSTTForTest] = useState(false)
+  
+  // Cached text display state
+  const [expandedCachedText, setExpandedCachedText] = useState<{[key: string]: boolean}>({})
+  const [currentCustomTestClone, setCurrentCustomTestClone] = useState<VoiceClone | null>(null)
+  
   // Form state
   const [newCloneName, setNewCloneName] = useState('')
   const [newCloneDescription, setNewCloneDescription] = useState('')
@@ -126,6 +164,9 @@ export default function VoiceClonePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [currentPlayingAudio, setCurrentPlayingAudio] = useState<HTMLAudioElement | null>(null)
   const [playingStates, setPlayingStates] = useState<{[key: string]: boolean}>({})
+  const recordingCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
   
   // File import state
   const [isDragOver, setIsDragOver] = useState(false)
@@ -144,6 +185,24 @@ export default function VoiceClonePage() {
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const trimmedAudioRef = useRef<HTMLAudioElement | null>(null)
+  
+  // Advanced recording state
+  const [recordingWaveform, setRecordingWaveform] = useState<number[]>([])
+  const [audioLevel, setAudioLevel] = useState<number>(0)
+  const [recordingQuality, setRecordingQuality] = useState<'low' | 'medium' | 'high' | 'studio'>('high')
+  const [noiseReduction, setNoiseReduction] = useState<boolean>(true)
+  const [autoGain, setAutoGain] = useState<boolean>(true)
+  const [echoCancellation, setEchoCancellation] = useState<boolean>(true)
+  
+  // Audio playback progress tracking
+  const [playbackProgress, setPlaybackProgress] = useState<number>(0)
+  const progressUpdateRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // Voice clone editing state
+  const [editingCloneName, setEditingCloneName] = useState<string | null>(null)
+  const [editingCloneDescription, setEditingCloneDescription] = useState<string | null>(null)
+  const [tempCloneName, setTempCloneName] = useState<string>('')
+  const [tempCloneDescription, setTempCloneDescription] = useState<string>('')
   
   // Sample prompts for voice cloning
   const samplePrompts = [
@@ -439,7 +498,13 @@ export default function VoiceClonePage() {
       modelSize: 'Cloud',
       tags: ['Google', 'Standard', 'Cloud'],
       featured: false,
-      webSpeechName: 'Google US English'
+      webSpeechName: 'Google US English',
+      ttsConfig: {
+        provider: 'google',
+        voice_name: 'en-US-Standard-A',
+        rate: 1.0,
+        pitch: 1.0
+      }
     },
     {
       id: 'google_en_us_standard_b',
@@ -457,7 +522,13 @@ export default function VoiceClonePage() {
       modelSize: 'Cloud',
       tags: ['Google', 'Standard', 'Authoritative'],
       featured: false,
-      webSpeechName: 'Google US English'
+      webSpeechName: 'Google US English',
+      ttsConfig: {
+        provider: 'google',
+        voice_name: 'en-US-Standard-B',
+        rate: 1.0,
+        pitch: 1.0
+      }
     },
     {
       id: 'google_en_uk_standard_a',
@@ -515,6 +586,10 @@ export default function VoiceClonePage() {
       featured: true,
       webSpeechName: 'Microsoft Aria Online (Natural) - English (United States)',
       ttsConfig: {
+        provider: 'microsoft',
+        voice_name: 'en-US-AriaNeural',
+        rate: 1.0,
+        pitch: 1.0,
         ms_voice_name: 'en-US-AriaNeural',
         system_voice_name: 'Microsoft Aria Online (Natural) - English (United States)'
       }
@@ -537,6 +612,10 @@ export default function VoiceClonePage() {
       featured: true,
       webSpeechName: 'Microsoft Guy Online (Natural) - English (United States)',
       ttsConfig: {
+        provider: 'microsoft',
+        voice_name: 'en-US-GuyNeural',
+        rate: 1.0,
+        pitch: 1.0,
         ms_voice_name: 'en-US-GuyNeural',
         system_voice_name: 'Microsoft Guy Online (Natural) - English (United States)'
       }
@@ -557,7 +636,13 @@ export default function VoiceClonePage() {
       modelSize: 'Cloud',
       tags: ['Microsoft', 'Assistant', 'Professional'],
       featured: false,
-      webSpeechName: 'Microsoft Jenny Online (Natural) - English (United States)'
+      webSpeechName: 'Microsoft Jenny Online (Natural) - English (United States)',
+      ttsConfig: {
+        provider: 'microsoft',
+        voice_name: 'en-US-JennyNeural',
+        rate: 1.0,
+        pitch: 1.0
+      }
     },
     {
       id: 'microsoft_ryan',
@@ -575,7 +660,13 @@ export default function VoiceClonePage() {
       modelSize: 'Cloud',
       tags: ['Microsoft', 'News', 'Authoritative'],
       featured: false,
-      webSpeechName: 'Microsoft Ryan Online (Natural) - English (United States)'
+      webSpeechName: 'Microsoft Ryan Online (Natural) - English (United States)',
+      ttsConfig: {
+        provider: 'microsoft',
+        voice_name: 'en-US-RyanNeural',
+        rate: 1.0,
+        pitch: 1.0
+      }
     },
     {
       id: 'microsoft_libby',
@@ -593,7 +684,13 @@ export default function VoiceClonePage() {
       modelSize: 'Cloud',
       tags: ['Microsoft', 'British', 'Sophisticated'],
       featured: false,
-      webSpeechName: 'Microsoft Libby Online (Natural) - English (United Kingdom)'
+      webSpeechName: 'Microsoft Libby Online (Natural) - English (United Kingdom)',
+      ttsConfig: {
+        provider: 'microsoft',
+        voice_name: 'en-GB-LibbyNeural',
+        rate: 1.0,
+        pitch: 1.0
+      }
     },
     
     // ===== COQUI VOICES (OPEN SOURCE) =====
@@ -1116,6 +1213,15 @@ export default function VoiceClonePage() {
     filterVoiceLibrary()
   }, [voiceLibrary, selectedGender, selectedNationality, selectedStyle, selectedSource, searchQuery, showFeaturedOnly])
   
+  // Cleanup animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+    }
+  }, [])
+  
   // Reconcile when switching to manage tab
   useEffect(() => {
     if (activeTab === 'manage') {
@@ -1234,13 +1340,17 @@ export default function VoiceClonePage() {
   }
   
   const [currentTestingVoice, setCurrentTestingVoice] = useState<string | null>(null)
+  const [currentTestingClone, setCurrentTestingClone] = useState<string | null>(null)
   const [voiceTestStates, setVoiceTestStates] = useState<{[key: string]: 'playing' | 'paused' | 'stopped'}>({})
   const [availableRealSamples, setAvailableRealSamples] = useState<{[key: string]: string}>({})
   
   const stopVoiceTest = (voiceId: string) => {
+    console.log(`🛑 Stopping voice test for: ${voiceId}`)
+    
     // Stop Web Speech API
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel()
+      console.log('🗣️ Web Speech API cancelled')
     }
     
     // Stop regular audio if playing
@@ -1248,11 +1358,34 @@ export default function VoiceClonePage() {
       currentPlayingAudio.pause()
       currentPlayingAudio.currentTime = 0
       setCurrentPlayingAudio(null)
+      console.log('🎵 Current playing audio stopped')
     }
     
     setCurrentTestingVoice(null)
     setVoiceTestStates(prev => ({ ...prev, [voiceId]: 'stopped' }))
     setPlayingStates(prev => ({ ...prev, [`voice_test_${voiceId}`]: false }))
+  }
+  
+  const stopVoiceCloneTest = (cloneId: string) => {
+    console.log(`🛑 Stopping voice clone test for: ${cloneId}`)
+    
+    // Stop Web Speech API
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+      console.log('🗣️ Web Speech API cancelled for clone test')
+    }
+    
+    // Stop regular audio if playing
+    if (currentPlayingAudio) {
+      currentPlayingAudio.pause()
+      currentPlayingAudio.currentTime = 0
+      setCurrentPlayingAudio(null)
+      console.log('🎵 Current playing audio stopped for clone test')
+    }
+    
+    setCurrentTestingClone(null)
+    setIsProcessing(false)
+    setPlayingStates(prev => ({ ...prev, [`clone_test_${cloneId}`]: false }))
   }
   
   const testLibraryVoice = async (voice: VoiceLibraryEntry) => {
@@ -1285,6 +1418,19 @@ export default function VoiceClonePage() {
         if (sampleUrl) {
           console.log(`✅ Found real voice sample for ${voice.name}: ${sampleUrl}`)
           
+          // CRITICAL: Stop any Web Speech API before playing real audio
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel()
+            console.log('🛑 Cancelled Web Speech API before playing real audio')
+          }
+          
+          // Stop any current audio
+          if (currentPlayingAudio) {
+            currentPlayingAudio.pause()
+            currentPlayingAudio.currentTime = 0
+            setCurrentPlayingAudio(null)
+          }
+          
           // Play the real voice sample
           const audio = new Audio(sampleUrl)
           setCurrentPlayingAudio(audio)
@@ -1313,16 +1459,63 @@ export default function VoiceClonePage() {
         }
       }
       
-      // If no real sample exists, try to generate one
-      if (voice.ttsConfig) {
-        console.log(`🔧 No existing sample found, attempting to generate one for ${voice.name}...`)
-        
+      // Try to generate a real voice sample using backend TTS
+      console.log(`🔧 Attempting to generate voice sample for ${voice.name} using backend TTS...`)
+      
+      // Determine TTS configuration based on voice source and properties
+      let ttsConfig = voice.ttsConfig || {}
+      
+      // If no ttsConfig exists, create one based on voice properties
+      if (!voice.ttsConfig) {
+        if (voice.source === 'Microsoft' || voice.webSpeechName?.includes('Microsoft')) {
+          // Use Microsoft Azure TTS for Microsoft voices
+          if (voice.name.includes('Aria')) {
+            ttsConfig = { provider: 'microsoft', voice_name: 'en-US-AriaNeural', rate: 1.0, pitch: 1.0 }
+          } else if (voice.name.includes('Guy')) {
+            ttsConfig = { provider: 'microsoft', voice_name: 'en-US-GuyNeural', rate: 1.0, pitch: 1.0 }
+          } else if (voice.name.includes('Jenny')) {
+            ttsConfig = { provider: 'microsoft', voice_name: 'en-US-JennyNeural', rate: 1.0, pitch: 1.0 }
+          } else if (voice.name.includes('Ryan')) {
+            ttsConfig = { provider: 'microsoft', voice_name: 'en-US-RyanNeural', rate: 1.0, pitch: 1.0 }
+          } else if (voice.name.includes('Libby')) {
+            ttsConfig = { provider: 'microsoft', voice_name: 'en-GB-LibbyNeural', rate: 1.0, pitch: 1.0 }
+          }
+        } else if (voice.source === 'Google') {
+          // Use Google TTS for Google voices
+          if (voice.language.includes('US')) {
+            ttsConfig = { 
+              provider: 'google', 
+              voice_name: voice.gender === 'Female' ? 'en-US-Standard-A' : 'en-US-Standard-B',
+              rate: 1.0, 
+              pitch: 1.0 
+            }
+          } else if (voice.language.includes('UK')) {
+            ttsConfig = { 
+              provider: 'google', 
+              voice_name: voice.gender === 'Female' ? 'en-GB-Standard-A' : 'en-GB-Standard-B',
+              rate: 1.0, 
+              pitch: 1.0 
+            }
+          }
+        } else if (voice.source === 'OpenVoice' || voice.source === 'Coqui-TTS') {
+          // Use available open-source TTS
+          ttsConfig = { 
+            provider: 'coqui', 
+            voice_name: voice.id,
+            rate: 1.0, 
+            pitch: 1.0 
+          }
+        }
+      }
+      
+      // Try backend TTS generation
+      try {
         const formData = new FormData()
         formData.append('voice_id', voice.id)
         formData.append('voice_name', voice.name)
         formData.append('source', voice.source)
         formData.append('text', testText)
-        formData.append('voice_config', JSON.stringify(voice.ttsConfig))
+        formData.append('voice_config', JSON.stringify(ttsConfig))
         
         const generateResponse = await fetch('http://localhost:8001/api/v1/generate-voice-sample', {
           method: 'POST',
@@ -1341,7 +1534,7 @@ export default function VoiceClonePage() {
             
             audio.oncanplaythrough = () => {
               audio.play().catch(e => console.error('Generated sample play error:', e))
-              setSuccess(`🎵 Playing newly generated ${voice.name} sample from ${voice.source}...`)
+              setSuccess(`🎵 Playing authentic ${voice.name} sample from ${voice.source} TTS engine...`)
             }
             
             audio.onended = () => {
@@ -1349,32 +1542,115 @@ export default function VoiceClonePage() {
               setCurrentTestingVoice(null)
               setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
               setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
-              setSuccess(`✅ Generated ${voice.name} sample complete! This voice has been cached for future use.`)
+              setSuccess(`✅ Authentic ${voice.name} sample complete! This voice has been cached for future use.`)
               setTimeout(() => setSuccess(null), 5000)
             }
             
             audio.onerror = () => {
-              console.error('Generated sample loading error, falling back to Web Speech API')
-              fallbackToWebSpeech()
+              console.error('Generated sample loading error, trying direct TTS')
+              tryDirectTTS()
             }
             
             return // Successfully using generated sample, exit here
           }
-        } else {
-          console.log(`⚠️ Failed to generate sample for ${voice.name}, falling back to Web Speech API`)
         }
+      } catch (error) {
+        console.error('Backend TTS generation error:', error)
       }
+      
+      // Try direct TTS API call
+      const tryDirectTTS = async () => {
+        console.log(`🔄 Trying direct TTS API for ${voice.name}...`)
+        
+        try {
+          // Try Microsoft Azure TTS endpoint
+          if (voice.source === 'Microsoft' || ttsConfig.provider === 'microsoft') {
+            const ttsResponse = await fetch('http://localhost:8001/api/v1/tts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                text: testText,
+                voice: ttsConfig.voice_name || 'en-US-AriaNeural',
+                rate: ttsConfig.rate || 1.0,
+                pitch: ttsConfig.pitch || 1.0
+              })
+            })
+            
+            if (ttsResponse.ok) {
+              // CRITICAL: Stop any Web Speech API before playing TTS audio
+              if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel()
+                console.log('🛑 Cancelled Web Speech API before playing TTS audio')
+              }
+              
+              // Stop any current audio
+              if (currentPlayingAudio) {
+                currentPlayingAudio.pause()
+                currentPlayingAudio.currentTime = 0
+                setCurrentPlayingAudio(null)
+              }
+              
+              const audioBlob = await ttsResponse.blob()
+              const audioUrl = URL.createObjectURL(audioBlob)
+              
+              const audio = new Audio(audioUrl)
+              setCurrentPlayingAudio(audio)
+              setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: true }))
+              
+              audio.oncanplaythrough = () => {
+                audio.play().catch(e => console.error('Direct TTS play error:', e))
+                setSuccess(`🎵 Playing ${voice.name} using modern ${voice.source} TTS engine...`)
+              }
+              
+              audio.onended = () => {
+                setCurrentPlayingAudio(null)
+                setCurrentTestingVoice(null)
+                setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
+                setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
+                URL.revokeObjectURL(audioUrl)
+                setSuccess(`✅ Modern TTS sample complete for ${voice.name}!`)
+                setTimeout(() => setSuccess(null), 5000)
+              }
+              
+              return // Successfully using direct TTS
+            }
+          }
+        } catch (error) {
+          console.error('Direct TTS error:', error)
+        }
+        
+        // Last resort - improved Web Speech API fallback
+        console.warn(`⚠️ No modern TTS available for ${voice.name}, using improved Web Speech fallback`)
+        setError(`⚠️ ${voice.name}: Authentic voice sample not available. Using legacy system approximation.
+        
+🔧 To experience the true voice quality:
+• Ensure backend server is running on port 8001
+• Check that ${voice.source} TTS service is configured
+• This approximation may sound different from the actual ${voice.source} voice`)
+        setTimeout(() => setError(null), 12000)
+        await fallbackToWebSpeech()
+      }
+      
+      // Call tryDirectTTS after it's defined
+      await tryDirectTTS()
     } catch (error) {
       console.error('Error trying to get/generate real voice sample:', error)
+      // Only call fallback if no audio is currently playing
+      if (!currentPlayingAudio || currentPlayingAudio.paused) {
+        await fallbackToWebSpeech()
+      }
     }
-    
-    // Call fallback if we reach here
-    await fallbackToWebSpeech()
     
     // Fallback to Web Speech API if real sample unavailable
     async function fallbackToWebSpeech() {
+      // Don't start Web Speech if real audio is already playing
+      if (currentPlayingAudio && !currentPlayingAudio.paused) {
+        console.log(`🚨 Skipping Web Speech fallback - real audio is already playing`)
+        return
+      }
+      
       console.log(`🔄 Using Web Speech API fallback for ${voice.name}...`)
-      setSuccess(`🔄 Using system voice approximation for ${voice.name} (no authentic sample available yet)...`)
+      setSuccess(`🔄 Playing system approximation of ${voice.name} (authentic ${voice.source} sample requires backend connection)...`)
       
       try {
         // Check if Web Speech API is available
@@ -1517,24 +1793,71 @@ export default function VoiceClonePage() {
         
         utterance.onend = () => {
           const voiceUsed = targetVoice ? `${targetVoice.name} (${targetVoice.lang})` : 'system default'
-          setSuccess(`✅ Voice test complete for ${voice.name}! Used: ${voiceUsed}`)
+          setSuccess(`✅ System approximation complete for ${voice.name}!
+          
+⚠️ Note: This was a legacy system voice, not the authentic ${voice.source} voice. For true ${voice.name} quality, ensure your backend server is running with ${voice.source} TTS configured.`)
           setCurrentTestingVoice(null)
           setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
           setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
-          setTimeout(() => setSuccess(null), 5000)
+          setTimeout(() => setSuccess(null), 8000)
         }
         
         utterance.onerror = (event) => {
           console.error('Speech synthesis error:', event)
-          setError(`❌ Voice test failed for ${voice.name}. ${event.error || 'Unknown error occurred.'}`)
-          setCurrentTestingVoice(null)
-          setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
-          setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
-          setTimeout(() => setError(null), 4000)
+          
+          // Handle common speech synthesis errors
+          if (event.error === 'interrupted') {
+            console.log('🔄 Speech interrupted, trying simpler approach...')
+            
+            // Try with a very simple, short text
+            const fallbackText = `Testing ${voice.name.split(' ')[0]}.`
+            const fallbackUtterance = new SpeechSynthesisUtterance(fallbackText)
+            
+            if (targetVoice) {
+              fallbackUtterance.voice = targetVoice
+            }
+            fallbackUtterance.rate = 1.0
+            fallbackUtterance.pitch = 1.0
+            fallbackUtterance.volume = 0.8
+            
+            fallbackUtterance.onend = () => {
+              setSuccess(`✅ Voice test completed for ${voice.name}!`)
+              setCurrentTestingVoice(null)
+              setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
+              setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
+              setTimeout(() => setSuccess(null), 3000)
+            }
+            
+            fallbackUtterance.onerror = () => {
+              setError(`⚠️ Could not test ${voice.name} - speech synthesis unavailable`)
+              setCurrentTestingVoice(null)
+              setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
+              setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
+              setTimeout(() => setError(null), 3000)
+            }
+            
+            // Cancel any ongoing speech and try fallback
+            window.speechSynthesis.cancel()
+            setTimeout(() => {
+              window.speechSynthesis.speak(fallbackUtterance)
+            }, 200)
+            
+          } else {
+            setError(`❌ Voice test failed for ${voice.name}. ${event.error || 'Speech synthesis error'}`)
+            setCurrentTestingVoice(null)
+            setVoiceTestStates(prev => ({ ...prev, [voice.id]: 'stopped' }))
+            setPlayingStates(prev => ({ ...prev, [`voice_test_${voice.id}`]: false }))
+            setTimeout(() => setError(null), 4000)
+          }
         }
         
-        // Start speaking
-        window.speechSynthesis.speak(utterance)
+        // Cancel any ongoing speech first, then start new one
+        window.speechSynthesis.cancel()
+        
+        // Small delay to ensure cancellation completes
+        setTimeout(() => {
+          window.speechSynthesis.speak(utterance)
+        }, 100)
         
       } else {
         // Fallback for browsers without Web Speech API
@@ -1598,11 +1921,184 @@ export default function VoiceClonePage() {
   }
   
   // Get unique values for filters
-  const getUniqueGenders = () => [...new Set(voiceLibrary.map(v => v.gender))]
-  const getUniqueNationalities = () => [...new Set(voiceLibrary.map(v => v.nationality))]
-  const getUniqueStyles = () => [...new Set(voiceLibrary.flatMap(v => v.style))]
-  const getUniqueSources = () => [...new Set(voiceLibrary.map(v => v.source))]
+  const getUniqueGenders = () => Array.from(new Set(voiceLibrary.map(v => v.gender)))
+  const getUniqueNationalities = () => Array.from(new Set(voiceLibrary.map(v => v.nationality)))
+  const getUniqueStyles = () => Array.from(new Set(voiceLibrary.flatMap(v => v.style)))
+  const getUniqueSources = () => Array.from(new Set(voiceLibrary.map(v => v.source)))
   
+  // Manually upload/sync local clones to backend if they are missing
+  const manualSyncClonesToBackend = async () => {
+    try {
+      setIsProcessing(true)
+      setError(null)
+      console.log('🔄 Manual sync: checking backend clones...')
+      const resp = await fetch('http://localhost:8001/api/v1/voice-clones')
+      const data = resp.ok ? await resp.json() : { voice_clones: [] }
+      const backendClones: any[] = Array.isArray(data.voice_clones) ? data.voice_clones : []
+
+      for (const clone of voiceClones) {
+        const exists = backendClones.some(bc => bc.name === clone.name || bc.voice_id === clone.backendId)
+        if (!exists) {
+          console.log(`⬆️ Uploading clone to backend: ${clone.name}`)
+          // Upload the first available sample if any
+          const sample = clone.samples.find(s => s.audioBlob instanceof Blob)
+          if (!sample) {
+            console.warn(`⚠️ No audio blob available for ${clone.name}; cannot upload. Please re-record or import a sample.`)
+            continue
+          }
+          const formData = new FormData()
+          formData.append('name', clone.name)
+          formData.append('transcript', sample.transcript || `Sample for ${clone.name}`)
+          formData.append('audio', sample.audioBlob as Blob, `${clone.name}_sample.webm`)
+
+          const createResp = await fetch('http://localhost:8001/api/v1/voice-clone', { method: 'POST', body: formData })
+          if (createResp.ok) {
+            const result = await createResp.json()
+            console.log(`✅ Uploaded ${clone.name} with backend ID ${result.voice_id}`)
+            // Update local state immediately
+            setVoiceClones(prev => {
+              const updatedClones = prev.map(c => 
+                c.id === clone.id ? { ...c, backendId: result.voice_id, id: result.voice_id, backendSynced: true } : c
+              )
+              saveVoiceClones(updatedClones)
+              return updatedClones
+            })
+          } else {
+            const errText = await createResp.text().catch(() => 'Unknown error')
+            console.error(`❌ Failed to upload ${clone.name}: ${errText}`)
+          }
+        }
+      }
+      setSuccess('✅ Manual backend sync complete')
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (e) {
+      console.error('Manual sync error:', e)
+      setError('Failed to sync clones with backend')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  // Force re-upload all clones (debug helper)
+  const forceReUploadAllClones = async () => {
+    try {
+      setIsProcessing(true)
+      setError(null)
+      console.log('📦 Force re-upload: Resetting all clone sync status...')
+      
+      // First, mark all clones as not synced
+      setVoiceClones(prev => {
+        const resetClones = prev.map(clone => ({ ...clone, backendSynced: false, backendId: undefined }))
+        saveVoiceClones(resetClones)
+        console.log('🔄 Reset sync status for clones:', resetClones.map(c => `${c.name}: ${c.samples.length} samples`))
+        return resetClones
+      })
+      
+      // Small delay to let state update
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // Now run manual sync
+      await manualSyncClonesToBackend()
+      
+      setSuccess('✅ Forced re-upload completed')
+    } catch (e) {
+      console.error('Force re-upload error:', e)
+      setError('Failed to force re-upload clones')
+    }
+  }
+
+  // Debug clone status
+  const debugCloneStatus = () => {
+    console.log('🔍 Debug: Current voice clones status:')
+    voiceClones.forEach(clone => {
+      const samplesWithAudio = clone.samples.filter(s => s.audioBlob && s.audioBlob instanceof Blob).length
+      const samplesWithUrls = clone.samples.filter(s => s.audioUrl).length
+      console.log(`\n📋 Clone: ${clone.name}`)
+      console.log(`   ID: ${clone.id}`)
+      console.log(`   Backend ID: ${clone.backendId || 'none'}`)
+      console.log(`   Backend Synced: ${clone.backendSynced}`)
+      console.log(`   Total Samples: ${clone.samples.length}`)
+      console.log(`   Samples with Audio Blob: ${samplesWithAudio}`)
+      console.log(`   Samples with Audio URL: ${samplesWithUrls}`)
+      console.log(`   Created: ${clone.createdAt}`)
+      
+      if (clone.samples.length > 0) {
+        console.log(`   Sample details:`)
+        clone.samples.forEach((sample, i) => {
+          console.log(`     ${i+1}. ${sample.name} - Duration: ${sample.duration}s, Has Blob: ${!!(sample.audioBlob && sample.audioBlob instanceof Blob)}, Has URL: ${!!sample.audioUrl}`)
+        })
+      }
+    })
+    
+    console.log('\n🔄 Sync Status Summary:')
+    console.log(`   Total clones: ${voiceClones.length}`)
+    console.log(`   Backend synced: ${voiceClones.filter(c => c.backendSynced).length}`)
+    console.log(`   Not synced: ${voiceClones.filter(c => !c.backendSynced).length}`)
+    console.log(`   With audio samples: ${voiceClones.filter(c => c.samples.some(s => s.audioBlob instanceof Blob)).length}`)
+  }
+
+  // TEST FUNCTION - Verify save/load works
+  const testSaveLoadProcess = () => {
+    console.log('🧪 TEST: Starting save/load verification...')
+    
+    // Create a test clone with a dummy sample
+    const testClone: VoiceClone = {
+      id: 'test_clone_123',
+      name: 'Test Clone',
+      description: 'Test description',
+      samples: [
+        {
+          id: 'test_sample_456',
+          name: 'Test Sample',
+          duration: 5.5,
+          audioBlob: new Blob(['fake audio data'], { type: 'audio/webm' }),
+          audioUrl: 'blob:test-url',
+          transcript: 'This is a test transcript',
+          quality: 0.85,
+          uploadedAt: new Date()
+        }
+      ],
+      createdAt: new Date(),
+      status: 'ready',
+      quality: 0.85,
+      backendSynced: false
+    }
+    
+    console.log('🧪 TEST: Created test clone:', testClone)
+    
+    // Test save
+    const testClones = [testClone]
+    console.log('🧪 TEST: Saving test clone...')
+    saveVoiceClones(testClones)
+    
+    // Wait a moment then test load
+    setTimeout(() => {
+      console.log('🧪 TEST: Loading from localStorage...')
+      const saved = localStorage.getItem('voice-clones')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        console.log('🧪 TEST: Loaded data:', parsed)
+        const testResult = parsed.find((c: any) => c.id === 'test_clone_123')
+        if (testResult && testResult.samples && testResult.samples.length > 0) {
+          console.log('✅ TEST PASSED: Sample data preserved!')
+          console.log('  - Sample name:', testResult.samples[0].name)
+          console.log('  - Sample duration:', testResult.samples[0].duration)
+          console.log('  - Sample transcript:', testResult.samples[0].transcript)
+          console.log('  - Sample quality:', testResult.samples[0].quality)
+        } else {
+          console.log('❌ TEST FAILED: Sample data lost!')
+        }
+      } else {
+        console.log('❌ TEST FAILED: No data saved!')
+      }
+      
+      // Clean up test data
+      const currentClones = voiceClones
+      saveVoiceClones(currentClones)
+      console.log('🧪 TEST: Cleaned up test data')
+    }, 100)
+  }
+
   const reconcileWithBackend = async () => {
     try {
       console.log('🔄 Reconciling frontend voice clones with backend...')
@@ -1681,21 +2177,50 @@ export default function VoiceClonePage() {
   const loadSavedVoiceClones = () => {
     try {
       const saved = localStorage.getItem('voice-clones')
+      console.log('📰 Loading voice clones from localStorage...')
       if (saved) {
-        const parsed = JSON.parse(saved).map((clone: any) => ({
+        console.log('📋 Raw localStorage data length:', saved.length)
+        const rawParsed = JSON.parse(saved)
+        console.log(`📋 Found ${rawParsed.length} clones in storage:`, rawParsed.map(c => `${c.name} (${c.samples?.length || 0} samples)`))
+        
+        const parsed = rawParsed.map((clone: any) => ({
           ...clone,
           createdAt: new Date(clone.createdAt),
           // Ensure backend sync properties exist (for existing clones)
           backendId: clone.backendId || undefined,
           backendSynced: clone.backendSynced || false,
-          samples: clone.samples?.map((sample: any) => ({
-            ...sample,
-            uploadedAt: new Date(sample.uploadedAt),
-            // Don't try to recreate URLs from null blobs
-            audioUrl: sample.audioBlob ? URL.createObjectURL(sample.audioBlob) : null
-          })).filter((sample: any) => sample.audioUrl) || [] // Filter out samples without URLs
+          customTestText: clone.customTestText || undefined,  // Load saved custom test text
+          samples: clone.samples?.map((sample: any) => {
+            console.log(`🔍 Loading sample for ${clone.name}:`, {
+              name: sample.name,
+              hasBlob: !!(sample.audioBlob && sample.audioBlob instanceof Blob),
+              duration: sample.duration,
+              quality: sample.quality,
+              transcript: sample.transcript?.substring(0, 50) + '...'
+            })
+            return {
+              ...sample,
+              uploadedAt: new Date(sample.uploadedAt),
+              // Handle missing audio gracefully - don't try to create URL from null blob
+              audioUrl: sample.audioBlob && sample.audioBlob instanceof Blob ? URL.createObjectURL(sample.audioBlob) : null,
+              audioBlob: sample.audioBlob && sample.audioBlob instanceof Blob ? sample.audioBlob : null,
+              // Ensure essential metadata is preserved
+              duration: sample.duration || 0,
+              quality: sample.quality || 0.7,
+              name: sample.name || 'Untitled Sample',
+              transcript: sample.transcript || '',
+              // Add flag to indicate if audio is missing
+              audioMissing: !sample.audioBlob || !(sample.audioBlob instanceof Blob),
+              // Generate a unique ID if missing
+              id: sample.id || Date.now().toString() + Math.random().toString(36).substr(2, 9)
+            }
+          }) || [] // Keep all samples, not just those with audioUrl
         }))
         setVoiceClones(parsed)
+        console.log(`📊 Loaded ${parsed.length} voice clones with sample details:`)
+        parsed.forEach(clone => {
+          console.log(`  - ${clone.name}: ${clone.samples.length} samples, total duration: ${clone.samples.reduce((total, sample) => total + (sample.duration || 0), 0).toFixed(1)}s`)
+        })
       }
     } catch (error) {
       console.error('Error loading saved voice clones:', error)
@@ -1707,19 +2232,124 @@ export default function VoiceClonePage() {
   
   const saveVoiceClones = (clones: VoiceClone[]) => {
     try {
+      console.log(`💾 Saving ${clones.length} voice clones...`)
+      clones.forEach(clone => {
+        console.log(`  - ${clone.name}: ${clone.samples.length} samples`)
+        if (clone.samples.length > 0) {
+          clone.samples.forEach((sample, i) => {
+            console.log(`    ${i+1}. ${sample.name} (${sample.duration}s, transcript: ${sample.transcript?.substring(0, 30)}...)`)
+          })
+        }
+      })
+      
       // Convert for storage (can't store Blob directly)
       const toSave = clones.map(clone => ({
         ...clone,
         samples: clone.samples.map(sample => ({
           ...sample,
+          // Preserve essential metadata for statistics
+          id: sample.id,
+          name: sample.name,
+          duration: sample.duration,
+          quality: sample.quality,
+          transcript: sample.transcript,
+          uploadedAt: sample.uploadedAt,
           // Note: We lose audio data on refresh - in production, would upload to server
           audioBlob: null,
           audioUrl: null
         }))
       }))
       localStorage.setItem('voice-clones', JSON.stringify(toSave))
+      console.log(`💾 Saved to localStorage with total samples:`, 
+        toSave.reduce((total, clone) => total + clone.samples.length, 0))
     } catch (error) {
       console.error('Error saving voice clones:', error)
+    }
+  }
+  
+  // Real-time waveform visualization
+  const drawRecordingWaveform = () => {
+    const canvas = recordingCanvasRef.current
+    const analyser = analyserRef.current
+    if (!canvas || !analyser) return
+    
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    
+    const bufferLength = analyser.frequencyBinCount
+    const dataArray = new Uint8Array(bufferLength)
+    
+    const draw = () => {
+      if (!isRecording) return
+      
+      analyser.getByteTimeDomainData(dataArray)
+      
+      // Calculate audio level
+      let sum = 0
+      for (let i = 0; i < bufferLength; i++) {
+        const sample = (dataArray[i] - 128) / 128
+        sum += sample * sample
+      }
+      const rms = Math.sqrt(sum / bufferLength)
+      setAudioLevel(rms)
+      
+      // Draw waveform
+      ctx.fillStyle = 'rgb(15, 15, 23)' // Dark background
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      
+      ctx.lineWidth = 2
+      ctx.strokeStyle = 'rgb(147, 51, 234)' // Purple waveform
+      ctx.beginPath()
+      
+      const sliceWidth = canvas.width / bufferLength
+      let x = 0
+      
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0
+        const y = (v * canvas.height) / 2
+        
+        if (i === 0) {
+          ctx.moveTo(x, y)
+        } else {
+          ctx.lineTo(x, y)
+        }
+        
+        x += sliceWidth
+      }
+      
+      ctx.stroke()
+      
+      // Draw level indicator
+      const levelHeight = rms * canvas.height
+      ctx.fillStyle = `hsl(${Math.max(0, 120 - rms * 120)}, 70%, 50%)`
+      ctx.fillRect(canvas.width - 20, canvas.height - levelHeight, 15, levelHeight)
+      
+      animationFrameRef.current = requestAnimationFrame(draw)
+    }
+    
+    draw()
+  }
+  
+  // Advanced recording function with quality settings
+  const getRecordingConstraints = () => {
+    const baseConstraints = {
+      channelCount: 1,
+      echoCancellation: echoCancellation,
+      noiseSuppression: noiseReduction,
+      autoGainControl: autoGain
+    }
+    
+    switch (recordingQuality) {
+      case 'studio':
+        return { ...baseConstraints, sampleRate: 48000, bitDepth: 24 }
+      case 'high':
+        return { ...baseConstraints, sampleRate: 44100, bitDepth: 16 }
+      case 'medium':
+        return { ...baseConstraints, sampleRate: 22050, bitDepth: 16 }
+      case 'low':
+        return { ...baseConstraints, sampleRate: 16000, bitDepth: 16 }
+      default:
+        return baseConstraints
     }
   }
   
@@ -1730,20 +2360,52 @@ export default function VoiceClonePage() {
       setAudioBlob(null)
       setAudioUrl(null)
       setRecordingTime(0)
+      setRecordingWaveform([])
+      setAudioLevel(0)
       
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          sampleRate: 44100, // Higher quality for voice cloning
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        } 
-      })
+      const constraints = getRecordingConstraints()
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints })
+      
+      // Set up audio analysis
+      const context = audioContext || new AudioContext()
+      if (!audioContext) setAudioContext(context)
+      
+      const source = context.createMediaStreamSource(stream)
+      const analyser = context.createAnalyser()
+      analyser.fftSize = 2048
+      analyser.smoothingTimeConstant = 0.8
+      source.connect(analyser)
+      analyserRef.current = analyser
+      
+      // Start real-time waveform visualization
+      drawRecordingWaveform()
+      
+      // Set up MediaRecorder with quality-based settings
+      const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg;codecs=opus'
+      ]
+      
+      let mimeType = 'audio/webm'
+      for (const type of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          mimeType = type
+          break
+        }
+      }
+      
+      const bitrates = {
+        studio: 320000,
+        high: 256000,
+        medium: 128000,
+        low: 64000
+      }
       
       mediaRecorderRef.current = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
-        bitsPerSecond: 256000 // Higher bitrate for voice cloning
+        mimeType,
+        bitsPerSecond: bitrates[recordingQuality]
       })
       
       const audioChunks: BlobPart[] = []
@@ -1752,14 +2414,33 @@ export default function VoiceClonePage() {
         audioChunks.push(event.data)
       }
       
-      mediaRecorderRef.current.onstop = () => {
-        const blob = new Blob(audioChunks, { type: 'audio/webm' })
+      mediaRecorderRef.current.onstop = async () => {
+        const blob = new Blob(audioChunks, { type: mimeType })
         setAudioBlob(blob)
-        setAudioUrl(URL.createObjectURL(blob))
+        const url = URL.createObjectURL(blob)
+        setAudioUrl(url)
+        
+        // Stop real-time analysis
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current)
+        }
+        
+        // Generate final waveform for the recorded audio
+        try {
+          const arrayBuffer = await blob.arrayBuffer()
+          const audioBuffer = await context.decodeAudioData(arrayBuffer)
+          const waveform = await generateWaveform(audioBuffer)
+          setRecordingWaveform(waveform)
+        } catch (error) {
+          console.error('Error generating final waveform:', error)
+        }
+        
         stream.getTracks().forEach(track => track.stop())
+        source.disconnect()
+        analyserRef.current = null
       }
       
-      mediaRecorderRef.current.start()
+      mediaRecorderRef.current.start(100) // Collect data every 100ms for smoother analysis
       setIsRecording(true)
       
       // Start timer
@@ -1782,7 +2463,71 @@ export default function VoiceClonePage() {
       clearInterval(timerRef.current)
     }
     
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+    }
+    
     setIsRecording(false)
+  }
+  
+  // Inline editing functions
+  const startEditingCloneName = (clone: VoiceClone) => {
+    setEditingCloneName(clone.id)
+    setTempCloneName(clone.name)
+  }
+  
+  const startEditingCloneDescription = (clone: VoiceClone) => {
+    setEditingCloneDescription(clone.id)
+    setTempCloneDescription(clone.description || '')
+  }
+  
+  const saveCloneName = () => {
+    if (!editingCloneName || !currentClone || !tempCloneName.trim()) return
+    
+    const updatedClone = {
+      ...currentClone,
+      name: tempCloneName.trim()
+    }
+    
+    const updatedClones = voiceClones.map(clone => 
+      clone.id === editingCloneName ? updatedClone : clone
+    )
+    
+    setVoiceClones(updatedClones)
+    setCurrentClone(updatedClone)
+    saveVoiceClones(updatedClones)
+    setEditingCloneName(null)
+    setTempCloneName('')
+    setSuccess('Voice clone name updated successfully!')
+    setTimeout(() => setSuccess(null), 3000)
+  }
+  
+  const saveCloneDescription = () => {
+    if (!editingCloneDescription || !currentClone) return
+    
+    const updatedClone = {
+      ...currentClone,
+      description: tempCloneDescription.trim() || undefined
+    }
+    
+    const updatedClones = voiceClones.map(clone => 
+      clone.id === editingCloneDescription ? updatedClone : clone
+    )
+    
+    setVoiceClones(updatedClones)
+    setCurrentClone(updatedClone)
+    saveVoiceClones(updatedClones)
+    setEditingCloneDescription(null)
+    setTempCloneDescription('')
+    setSuccess('Voice clone description updated successfully!')
+    setTimeout(() => setSuccess(null), 3000)
+  }
+  
+  const cancelEdit = () => {
+    setEditingCloneName(null)
+    setEditingCloneDescription(null)
+    setTempCloneName('')
+    setTempCloneDescription('')
   }
   
   // Audio playback functions
@@ -1793,6 +2538,30 @@ export default function VoiceClonePage() {
       setCurrentPlayingAudio(null)
     }
     setPlayingStates({})
+    setPlaybackProgress(0)
+    if (progressUpdateRef.current) {
+      clearInterval(progressUpdateRef.current)
+    }
+  }
+  
+  const startProgressTracking = (audio: HTMLAudioElement, duration: number) => {
+    if (progressUpdateRef.current) {
+      clearInterval(progressUpdateRef.current)
+    }
+    
+    progressUpdateRef.current = setInterval(() => {
+      if (audio && !audio.paused && duration > 0) {
+        const progress = (audio.currentTime / duration) * 100
+        setPlaybackProgress(progress)
+      }
+    }, 50) // Update every 50ms for smooth progress
+  }
+  
+  const stopProgressTracking = () => {
+    if (progressUpdateRef.current) {
+      clearInterval(progressUpdateRef.current)
+    }
+    setPlaybackProgress(0)
   }
   
   const toggleAudioPlayback = (audioUrl: string, sampleId: string) => {
@@ -1970,17 +2739,31 @@ export default function VoiceClonePage() {
       uploadedAt: new Date()
     }
     
+    console.log('✅ Adding new sample to frontend:', newSample.name, 'Duration:', newSample.duration)
+    
     // Use the most current version of voiceClones to avoid overwriting backend sync
     setVoiceClones(prevClones => {
-      const mostCurrentClone = prevClones.find(c => c.id === currentClone.id || c.backendId === currentClone.id) || currentClone
+      const mostCurrentClone = prevClones.find(c => 
+        c.id === currentClone.id || 
+        c.backendId === currentClone.id || 
+        c.name === currentClone.name
+      ) || currentClone
+      
       const updatedClone = {
         ...mostCurrentClone,  // Use the most current version (with backend sync)
         samples: [...mostCurrentClone.samples, newSample]
       }
       
-      const updatedClones = prevClones.map(clone => 
-        (clone.id === currentClone.id || clone.backendId === currentClone.id) ? updatedClone : clone
-      )
+      console.log('✅ Updated clone samples count:', updatedClone.samples.length)
+      
+      const updatedClones = prevClones.map(clone => {
+        if (clone.id === currentClone.id || 
+            clone.backendId === currentClone.id || 
+            clone.name === currentClone.name) {
+          return updatedClone
+        }
+        return clone
+      })
       
       setCurrentClone(updatedClone)
       saveVoiceClones(updatedClones)
@@ -2115,6 +2898,16 @@ export default function VoiceClonePage() {
       return
     }
     
+    const playingKey = `cached_test_${clone.id}`
+    
+    // If already playing this audio, pause it
+    if (currentPlayingAudio && playingStates[playingKey]) {
+      currentPlayingAudio.pause()
+      setCurrentPlayingAudio(null)
+      setPlayingStates({})
+      return
+    }
+    
     let audioUrl = clone.cachedTestAudio.audioUrl
     
     // Load audio URL if not already loaded
@@ -2132,7 +2925,7 @@ export default function VoiceClonePage() {
     // Play the cached audio
     const audio = new Audio(audioUrl)
     setCurrentPlayingAudio(audio)
-    setPlayingStates({ [`cached_test_${clone.id}`]: true })
+    setPlayingStates({ [playingKey]: true })
     
     audio.oncanplaythrough = () => {
       audio.play().catch(e => console.error('Audio play error:', e))
@@ -2152,10 +2945,24 @@ export default function VoiceClonePage() {
     
     const testDate = new Date(clone.cachedTestAudio.testedAt * 1000).toLocaleDateString()
     setSuccess(`📋 Playing cached test audio from ${testDate}: "${clone.cachedTestAudio.text.substring(0, 50)}..."`)
+    
+    // Auto-clear success message after 5 seconds
+    setTimeout(() => {
+      setSuccess(null)
+    }, 5000)
   }
   
   // Test voice clone with VibeVoice
-  const testVoiceClone = async (cloneParam: VoiceClone) => {
+  const testVoiceClone = async (cloneParam: VoiceClone, customText?: string) => {
+    console.log(`🎯 testVoiceClone FUNCTION CALLED:`, {
+      cloneName: cloneParam.name,
+      cloneId: cloneParam.id,
+      samplesCount: cloneParam.samples.length,
+      backendSynced: cloneParam.backendSynced,
+      customText: customText ? `"${customText}"` : 'none',
+      currentIsProcessing: isProcessing
+    })
+    
     // Always use the most current version from state to ensure we have latest backend sync
     let clone = voiceClones.find(c => c.id === cloneParam.id || c.backendId === cloneParam.id || c.backendId === cloneParam.backendId) || cloneParam
     
@@ -2166,12 +2973,16 @@ export default function VoiceClonePage() {
     
     try {
       setIsProcessing(true)
+      setCurrentTestingClone(clone.id)
       setError(null)
       
       console.log('🎭 Testing voice clone:', clone.name)
       console.log('📋 Voice samples:', clone.samples.length)
+      setPlayingStates(prev => ({ ...prev, [`clone_test_${clone.id}`]: true }))
       
-      const testText = `Hello! This is ${clone.name}, testing my cloned voice. I have ${clone.samples.length} voice samples for training.`
+      // Use custom text if provided, otherwise default
+      const testText = customText || customTestText || `Hello! This is ${clone.name}, testing my cloned voice. I have ${clone.samples.length} voice samples for training.`
+      console.log('📝 Test text:', testText)
       
       // Debug: Log current clone state
       console.log('🔍 Current clone state:', {
@@ -2181,20 +2992,23 @@ export default function VoiceClonePage() {
         name: clone.name
       })
       
-      // If this voice clone is not synced with backend, try to reconcile first
+      // Try to reconcile with backend if not synced, but don't block testing
       if (!clone.backendSynced) {
         console.log('⚠️ Clone not synced, attempting reconciliation before test...')
-        await reconcileWithBackend()
-        
-        // Check again after reconciliation
-        const updatedClone = voiceClones.find(c => c.name === clone.name)
-        if (updatedClone && !updatedClone.backendSynced) {
-          setError(`❌ Voice clone "${clone.name}" is not synced with backend.\n\nThis means the voice clone exists only locally and hasn't been uploaded to the VibeVoice server yet.\n\nTo fix this:\n1. Click "Edit" on this voice clone\n2. Upload a WAV voice sample with transcript\n3. The system will automatically sync with the backend`)
-          return
-        }
-        // Update clone reference if reconciliation worked
-        if (updatedClone && updatedClone.backendSynced) {
-          clone = updatedClone
+        try {
+          await reconcileWithBackend()
+          
+          // Check again after reconciliation
+          const updatedClone = voiceClones.find(c => c.name === clone.name)
+          if (updatedClone && updatedClone.backendSynced) {
+            clone = updatedClone
+            console.log(`✅ Successfully synced ${clone.name} with backend`)
+          } else {
+            console.log(`⚠️ Could not sync ${clone.name}, will attempt direct backend connection`)
+          }
+        } catch (syncError) {
+          console.error('Sync error:', syncError)
+          console.log(`⚠️ Sync failed for ${clone.name}, will attempt direct backend connection`)
         }
       }
       
@@ -2219,19 +3033,20 @@ export default function VoiceClonePage() {
             resolvedVoiceId = backendClones[0].voice_id
             console.log(`🎯 Using single available backend clone: ${resolvedVoiceId}`)
           } else if (backendClones.length === 0) {
-            setError(`❌ No voice clones found on backend. Please create a voice sample first to train the voice clone.`)
-            return
+            console.log(`⚠️ No voice clones found on backend, using local clone ID: ${clone.id}`)
+            resolvedVoiceId = clone.id
           } else {
-            setError(`❌ Cannot find matching voice clone "${clone.name}" on backend. Available backend clones: ${backendClones.map(c => c.name).join(', ')}`)
-            return
+            console.log(`⚠️ Cannot find matching voice clone "${clone.name}" on backend, using local clone ID: ${clone.id}`)
+            console.log(`Available backend clones: ${backendClones.map(c => c.name).join(', ')}`)
+            resolvedVoiceId = clone.id
           }
         } else {
           throw new Error(`Backend returned ${listResp.status}: ${listResp.statusText}`)
         }
       } catch (reconErr) {
         console.error('❌ Failed to reconcile voice clone with backend:', reconErr)
-        setError(`❌ Cannot connect to backend for voice clone testing: ${reconErr}`)
-        return
+        console.log(`⚠️ Backend connection failed, will try direct voice clone test anyway...`)
+        // Don't return here - continue with the test attempt
       }
 
       const voiceIdToUse = resolvedVoiceId
@@ -2270,26 +3085,37 @@ export default function VoiceClonePage() {
         
         // Update the clone with new cached test audio info (audio is auto-cached by backend)
         const currentTime = Math.floor(Date.now() / 1000)
+        const isCustom = customText || customTestText
         const updatedCachedInfo = {
           text: testText,
           audioUrl, // Store the current audio URL for immediate use
           audioSize: audioBlob.size,
           testedAt: currentTime,
-          cacheKey: `${voiceIdToUse}_test_${Math.random().toString(36).substring(7)}`
+          cacheKey: `${voiceIdToUse}_test_${Math.random().toString(36).substring(7)}`,
+          isCustomText: !!isCustom
         }
         
-        // Update the voice clone with cached audio info
+        // Save custom test text to the clone if provided
+        if (isCustom) {
+          clone.customTestText = testText
+        }
+        
+        // Update the voice clone with cached audio info and custom test text
         setVoiceClones(prevClones => 
           prevClones.map(c => 
             c.id === clone.id 
-              ? { ...c, cachedTestAudio: updatedCachedInfo }
+              ? { ...c, cachedTestAudio: updatedCachedInfo, customTestText: isCustom ? testText : c.customTestText }
               : c
           )
         )
         
         // Update current clone if it matches
         if (currentClone?.id === clone.id) {
-          setCurrentClone(prev => prev ? { ...prev, cachedTestAudio: updatedCachedInfo } : prev)
+          setCurrentClone(prev => prev ? { 
+            ...prev, 
+            cachedTestAudio: updatedCachedInfo,
+            customTestText: isCustom ? testText : prev.customTestText
+          } : prev)
         }
         
         setSuccess(`🎉 Voice clone test successful! Generated ${Math.round(audioBlob.size / 1024)}KB audio for ${clone.name} using VibeVoice-Large. 📋 Test audio cached for future playback.`)
@@ -2333,17 +3159,16 @@ export default function VoiceClonePage() {
       }
       
     } catch (error: any) {
-      console.error('🚨 Voice clone test error:', error)
+      console.error('😨 Voice clone test error:', error)
       
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        setError('❌ Cannot connect to backend server. Make sure it\'s running on port 8001.')
+        setError(`❌ Cannot connect to backend server at localhost:8001.\n\n🔧 Troubleshooting:\n• Ensure your backend server is running\n• Check if port 8001 is accessible\n• Verify VibeVoice API is properly configured\n\nVoice clone testing requires the backend connection for VibeVoice-Large processing.`)
       } else if (error.message.includes('500')) {
-        setError(`❌ Server error testing ${clone.name}. This might be a VibeVoice configuration issue. Check that VibeVoice-Large model is properly set up at Z:\\Models\\VibeVoice-Large`)
+        setError(`❌ Server error testing ${clone.name}.\n\n🔧 VibeVoice Configuration Issues:\n• Check VibeVoice-Large model at Z:\\Models\\VibeVoice-Large\n• Verify ONNX Runtime compatibility\n• Check server logs for detailed error information\n\nThe voice clone exists but the TTS engine needs proper setup.`)
       } else if (error.message.includes('404')) {
-        // Simulate success for demo purposes
-        setSuccess(`🎭 Demo Mode: Voice clone "${clone.name}" would sound great with ${clone.samples.length} samples! Connect VibeVoice API for real generation.`)
+        setError(`❌ Voice clone "${clone.name}" not found on backend.\n\n🔄 This can happen if:\n• The voice clone needs to be re-synced with backend\n• Backend database was reset\n• Voice clone was created locally but not uploaded\n\nTry adding a new voice sample to re-sync with backend.`)
       } else {
-        setError(`❌ Test failed for ${clone.name}: ${error.message}`)
+        setError(`❌ Voice clone test failed for ${clone.name}:\n\n${error.message}\n\nCheck browser console for detailed error information.`)
       }
       
       // Add some helpful debug info
@@ -2356,6 +3181,8 @@ export default function VoiceClonePage() {
       
     } finally {
       setIsProcessing(false)
+      setCurrentTestingClone(null)
+      setPlayingStates(prev => ({ ...prev, [`clone_test_${clone.id}`]: false }))
       // Auto-clear messages after 5 seconds
       setTimeout(() => {
         setSuccess(null)
@@ -2596,7 +3423,7 @@ export default function VoiceClonePage() {
     }
   }
   
-  const drawWaveform = () => {
+  const drawWaveform = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas || waveformData.length === 0) return
     
@@ -2637,7 +3464,38 @@ export default function VoiceClonePage() {
     ctx.moveTo(endX, 0)
     ctx.lineTo(endX, height)
     ctx.stroke()
-  }
+    
+    // Draw playback position indicator
+    if (playingStates['trimmer-preview'] && trimmedAudioRef.current && !trimmedAudioRef.current.paused) {
+      const currentTime = trimmedAudioRef.current.currentTime
+      console.log('🔴 Drawing position indicator at time:', currentTime.toFixed(2), 'Range:', trimStart.toFixed(2), '-', trimEnd.toFixed(2))
+      
+      if (currentTime >= trimStart && currentTime <= trimEnd && (endX - startX) > 0) {
+        const playbackX = ((currentTime - trimStart) / (trimEnd - trimStart)) * (endX - startX) + startX
+        console.log('🔴 Playback position X:', playbackX, 'Canvas width:', width)
+        
+        // Draw playback position line
+        ctx.strokeStyle = '#ef4444' // Red color for playback position
+        ctx.lineWidth = 3
+        ctx.setLineDash([])  // Solid line
+        ctx.beginPath()
+        ctx.moveTo(playbackX, 0)
+        ctx.lineTo(playbackX, height)
+        ctx.stroke()
+        
+        // Draw playback position circle at top
+        ctx.fillStyle = '#ef4444'
+        ctx.beginPath()
+        ctx.arc(playbackX, 8, 6, 0, 2 * Math.PI)
+        ctx.fill()
+        
+        // Draw playback position circle at bottom
+        ctx.beginPath()
+        ctx.arc(playbackX, height - 8, 6, 0, 2 * Math.PI)
+        ctx.fill()
+      }
+    }
+  }, [waveformData, trimStart, trimEnd, importedDuration, playingStates, trimmedAudioRef])
   
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
@@ -2761,10 +3619,10 @@ export default function VoiceClonePage() {
     if (waveformData.length > 0 && canvasRef.current) {
       drawWaveform()
     }
-  }, [waveformData, trimStart, trimEnd, importedDuration])
+  }, [waveformData, trimStart, trimEnd, importedDuration, drawWaveform])
   
   // Format time display
-  const formatTime = (seconds: number) => {
+  const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
     return `${mins}:${secs.toString().padStart(2, '0')}`
@@ -2878,6 +3736,7 @@ export default function VoiceClonePage() {
         <AnimatePresence>
           {error && (
             <motion.div
+              key="error-message"
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
@@ -2898,6 +3757,7 @@ export default function VoiceClonePage() {
           
           {success && (
             <motion.div
+              key="success-message"
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
@@ -2949,12 +3809,62 @@ export default function VoiceClonePage() {
                       }`}
                     >
                       <div className="text-left">
-                        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-2">
-                          {clone.name}
-                        </h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                          {clone.description || 'No description'}
-                        </p>
+                        {editingCloneName === clone.id ? (
+                          <div className="mb-2">
+                            <input
+                              type="text"
+                              value={tempCloneName}
+                              onChange={(e) => setTempCloneName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveCloneName()
+                                if (e.key === 'Escape') cancelEdit()
+                              }}
+                              onBlur={saveCloneName}
+                              autoFocus
+                              className="w-full px-2 py-1 text-sm font-semibold bg-white dark:bg-gray-700 border border-purple-500 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            />
+                          </div>
+                        ) : (
+                          <h3 
+                            className="font-semibold text-gray-900 dark:text-gray-100 mb-2 cursor-pointer hover:text-purple-600 transition-colors flex items-center gap-2"
+                            onClick={() => startEditingCloneName(clone)}
+                            title="Click to edit name"
+                          >
+                            {clone.name}
+                            <svg className="h-3 w-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                          </h3>
+                        )}
+                        
+                        {editingCloneDescription === clone.id ? (
+                          <div className="mb-3">
+                            <textarea
+                              value={tempCloneDescription}
+                              onChange={(e) => setTempCloneDescription(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault()
+                                  saveCloneDescription()
+                                }
+                                if (e.key === 'Escape') cancelEdit()
+                              }}
+                              onBlur={saveCloneDescription}
+                              autoFocus
+                              rows={2}
+                              placeholder="Enter description..."
+                              className="w-full px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-purple-500 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+                            />
+                          </div>
+                        ) : (
+                          <p 
+                            className="text-sm text-gray-600 dark:text-gray-400 mb-3 cursor-pointer hover:text-purple-600 transition-colors"
+                            onClick={() => startEditingCloneDescription(clone)}
+                            title="Click to edit description"
+                          >
+                            {clone.description || 'Click to add description'}
+                          </p>
+                        )}
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-gray-500">
                             {clone.samples.length} samples
@@ -3000,16 +3910,36 @@ export default function VoiceClonePage() {
                         Working with: {currentClone.name}
                       </h3>
                       <button
-                        onClick={() => testVoiceClone(currentClone)}
-                        disabled={isProcessing || currentClone.samples.length === 0}
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white rounded-lg transition-colors flex items-center gap-2"
+                        onClick={() => {
+                          if (currentTestingClone === currentClone.id) {
+                            stopVoiceCloneTest(currentClone.id)
+                          } else {
+                            testVoiceClone(currentClone)
+                          }
+                        }}
+                        disabled={isProcessing && currentTestingClone !== currentClone.id || currentClone.samples.length === 0}
+                        className={`px-4 py-2 text-white rounded-lg transition-colors flex items-center gap-2 ${
+                          currentTestingClone === currentClone.id
+                            ? 'bg-red-600 hover:bg-red-700'
+                            : 'bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300'
+                        }`}
                       >
-                        {isProcessing ? (
-                          <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                        {currentTestingClone === currentClone.id ? (
+                          <>
+                            <StopIcon className="h-4 w-4" />
+                            Stop Test
+                          </>
+                        ) : isProcessing && currentTestingClone === currentClone.id ? (
+                          <>
+                            <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                            Testing...
+                          </>
                         ) : (
-                          <SpeakerWaveIcon className="h-4 w-4" />
+                          <>
+                            <SpeakerWaveIcon className="h-4 w-4" />
+                            Test Voice
+                          </>
                         )}
-                        Test Voice
                       </button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
@@ -3019,13 +3949,19 @@ export default function VoiceClonePage() {
                       </div>
                       <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
                         <div className="text-2xl font-bold text-green-600">
-                          {Math.round(currentClone.samples.reduce((acc, sample) => acc + sample.quality, 0) / Math.max(currentClone.samples.length, 1) * 100)}%
+                          {currentClone.samples.length > 0 ? Math.round(currentClone.samples.reduce((acc, sample) => acc + sample.quality, 0) / currentClone.samples.length * 100) : 0}%
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400">Avg Quality</div>
                       </div>
                       <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
                         <div className="text-2xl font-bold text-blue-600">
-                          {Math.round(currentClone.samples.reduce((acc, sample) => acc + sample.duration, 0) / 60)}m
+                          {(() => {
+                            if (currentClone.samples.length === 0) return '0s'
+                            const totalSeconds = currentClone.samples.reduce((acc, sample) => acc + sample.duration, 0)
+                            const minutes = Math.floor(totalSeconds / 60)
+                            const seconds = Math.round(totalSeconds % 60)
+                            return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+                          })()}
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400">Total Audio</div>
                       </div>
@@ -3036,15 +3972,19 @@ export default function VoiceClonePage() {
               
               {currentClone && (
                 <>
-                  {/* Recording Interface */}
+                  {/* Professional Recording Interface */}
                   <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-8">
                     <div className="flex items-center justify-between mb-6">
                       <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3">
                         <MicrophoneIcon className="h-6 w-6 text-red-600" />
-                        Record or Import Voice Sample
+                        Professional Voice Recording Studio
                       </h2>
                       
                       <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                          Studio Ready
+                        </div>
                         <button
                           onClick={() => {
                             setShowTrimmer(false)
@@ -3052,13 +3992,162 @@ export default function VoiceClonePage() {
                             setImportedAudioUrl(null)
                             setAudioBlob(null)
                             setAudioUrl(null)
+                            setRecordingWaveform([])
+                            setAudioLevel(0)
                           }}
                           className="px-3 py-1 text-sm text-gray-600 dark:text-gray-300 hover:text-purple-600 transition-colors"
                         >
-                          Reset
+                          Reset Studio
                         </button>
                       </div>
                     </div>
+                    
+                    {/* Recording Quality & Settings Panel */}
+                    <div className="mb-6 p-4 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+                        <svg className="h-5 w-5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                        </svg>
+                        Recording Quality & Audio Processing
+                      </h3>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {/* Recording Quality */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Quality Preset
+                          </label>
+                          <select
+                            value={recordingQuality}
+                            onChange={(e) => setRecordingQuality(e.target.value as 'low' | 'medium' | 'high' | 'studio')}
+                            className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                          >
+                            <option value="low">Low (16kHz, 64kbps)</option>
+                            <option value="medium">Medium (22kHz, 128kbps)</option>
+                            <option value="high">High (44kHz, 256kbps)</option>
+                            <option value="studio">Studio (48kHz, 320kbps)</option>
+                          </select>
+                        </div>
+                        
+                        {/* Audio Processing Toggles */}
+                        <div className="space-y-2">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={noiseReduction}
+                              onChange={(e) => setNoiseReduction(e.target.checked)}
+                              className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                            />
+                            <span className="text-sm text-gray-700 dark:text-gray-300">Noise Reduction</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={echoCancellation}
+                              onChange={(e) => setEchoCancellation(e.target.checked)}
+                              className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                            />
+                            <span className="text-sm text-gray-700 dark:text-gray-300">Echo Cancellation</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={autoGain}
+                              onChange={(e) => setAutoGain(e.target.checked)}
+                              className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                            />
+                            <span className="text-sm text-gray-700 dark:text-gray-300">Auto Gain Control</span>
+                          </label>
+                        </div>
+                        
+                        {/* Audio Level Meter */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Input Level
+                          </label>
+                          <div className="relative h-16 bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden">
+                            <div 
+                              className="absolute bottom-0 left-0 w-full transition-all duration-75 ease-out"
+                              style={{ 
+                                height: `${Math.min(audioLevel * 100, 100)}%`,
+                                background: `linear-gradient(to top, #10b981, #f59e0b, #ef4444)`
+                              }}
+                            ></div>
+                            <div className="absolute inset-0 flex items-center justify-center text-xs font-medium text-gray-700 dark:text-gray-300">
+                              {Math.round(audioLevel * 100)}%
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Recording Stats */}
+                        <div className="space-y-2">
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
+                            <div>Duration: {formatTime(recordingTime)}</div>
+                            <div>Quality: {recordingQuality.charAt(0).toUpperCase() + recordingQuality.slice(1)}</div>
+                            <div>Status: {isRecording ? '🔴 Recording' : '⏸️ Stopped'}</div>
+                            {audioUrl && <div>✅ Audio Ready</div>}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Real-time Waveform Display */}
+                    {isRecording && (
+                      <div className="mb-6 p-4 bg-gray-900 dark:bg-black rounded-xl">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-medium text-white flex items-center gap-2">
+                            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                            Live Recording Waveform
+                          </h4>
+                          <div className="text-xs text-gray-400">
+                            {formatTime(recordingTime)} • Level: {Math.round(audioLevel * 100)}%
+                          </div>
+                        </div>
+                        <canvas
+                          ref={recordingCanvasRef}
+                          width={800}
+                          height={120}
+                          className="w-full h-20 rounded border border-gray-700"
+                        />
+                      </div>
+                    )}
+                    
+                    {/* Final Recorded Waveform Display */}
+                    {!isRecording && recordingWaveform.length > 0 && (
+                      <div className="mb-6 p-4 bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 rounded-xl border border-green-200 dark:border-green-800">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                            <CheckCircleIcon className="h-4 w-4 text-green-600" />
+                            Recorded Audio Waveform
+                          </h4>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
+                            Duration: {formatTime(recordingTime)} • Quality: {recordingQuality}
+                          </div>
+                        </div>
+                        <div className="relative">
+                          <canvas
+                            width={800}
+                            height={100}
+                            className="w-full h-16 bg-gray-100 dark:bg-gray-800 rounded border border-gray-300 dark:border-gray-600"
+                            ref={(canvas) => {
+                              if (canvas && recordingWaveform.length > 0) {
+                                const ctx = canvas.getContext('2d')
+                                if (ctx) {
+                                  ctx.fillStyle = '#f3f4f6'
+                                  ctx.fillRect(0, 0, canvas.width, canvas.height)
+                                  ctx.fillStyle = '#8b5cf6'
+                                  const barWidth = canvas.width / recordingWaveform.length
+                                  recordingWaveform.forEach((amplitude, i) => {
+                                    const barHeight = amplitude * canvas.height
+                                    ctx.fillRect(i * barWidth, canvas.height - barHeight, barWidth - 1, barHeight)
+                                  })
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                       {/* Recording Method */}
@@ -3178,16 +4267,44 @@ export default function VoiceClonePage() {
                         </div>
                         
                         <div className="space-y-4">
+                          {/* Waveform Instructions */}
+                          <div className="p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700/50 rounded-lg">
+                            <div className="flex items-start gap-3">
+                              <div className="text-blue-600 dark:text-blue-400 mt-0.5">
+                                💡
+                              </div>
+                              <div className="text-sm">
+                                <p className="text-blue-800 dark:text-blue-200 font-medium mb-1">
+                                  How to use the waveform editor:
+                                </p>
+                                <ul className="text-blue-700 dark:text-blue-300 space-y-1">
+                                  <li>• <strong>Click on waveform</strong> to set start/end points</li>
+                                  <li>• <strong>Use blue sliders below</strong> for precise timing control</li>
+                                  <li>• <strong>Drag numeric inputs</strong> or type exact timestamps</li>
+                                  <li>• <strong>Try quick buttons</strong> for common selections</li>
+                                </ul>
+                              </div>
+                            </div>
+                          </div>
+                          
                           {/* Waveform Canvas */}
                           <div className="relative">
-                            <canvas
-                              ref={canvasRef}
-                              width={800}
-                              height={200}
-                              onClick={handleCanvasClick}
-                              className="w-full h-32 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-crosshair border border-gray-300 dark:border-gray-600 waveform-canvas transition-all duration-200 hover:shadow-lg"
-                              style={{ aspectRatio: '4/1' }}
-                            />
+                            <div className="relative group">
+                              <canvas
+                                ref={canvasRef}
+                                width={800}
+                                height={200}
+                                onClick={handleCanvasClick}
+                                className="w-full h-32 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-crosshair border border-gray-300 dark:border-gray-600 waveform-canvas transition-all duration-200 hover:shadow-lg hover:border-purple-400"
+                                style={{ aspectRatio: '4/1' }}
+                                title="Click anywhere on the waveform to set trim points. Closer to start = move start time, closer to end = move end time."
+                              />
+                              
+                              {/* Hover tooltip */}
+                              <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+                                Click waveform to set trim points • Purple area = selected
+                              </div>
+                            </div>
                             
                             {/* Time markers */}
                             <div className="flex justify-between text-xs text-gray-500 mt-2 px-2">
@@ -3195,14 +4312,30 @@ export default function VoiceClonePage() {
                               <span>{formatTime(importedDuration / 2)}</span>
                               <span>{formatTime(importedDuration)}</span>
                             </div>
+                            
+                            {/* Selection indicators */}
+                            <div className="flex justify-between text-xs mt-1 px-2">
+                              <div className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                <span>Start: {formatTime(trimStart)}</span>
+                              </div>
+                              <div className="text-purple-600 dark:text-purple-400 font-medium">
+                                Selected: {formatTime(trimEnd - trimStart)}
+                              </div>
+                              <div className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                                <span>End: {formatTime(trimEnd)}</span>
+                                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                              </div>
+                            </div>
                           </div>
                           
                           {/* Trim Controls */}
                           <div className="space-y-4">
                             {/* Range Sliders */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              <div className="group">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+                                  <div className="w-3 h-3 bg-blue-500 rounded-full shadow-lg" title="Start point marker"></div>
                                   Start Time: {formatTime(trimStart)}
                                 </label>
                                 <input
@@ -3212,11 +4345,16 @@ export default function VoiceClonePage() {
                                   step={0.01}
                                   value={trimStart}
                                   onChange={(e) => setTrimStart(parseFloat(e.target.value))}
-                                  className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                                  className="w-full h-4 bg-gray-200 rounded-lg appearance-none cursor-pointer slider hover:bg-gray-300 transition-colors"
+                                  title="Drag to adjust start time of selection"
                                 />
+                                <div className="text-xs text-blue-600 dark:text-blue-400 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  💡 Drag the blue handle to set where audio starts
+                                </div>
                               </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              <div className="group">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+                                  <div className="w-3 h-3 bg-blue-500 rounded-full shadow-lg" title="End point marker"></div>
                                   End Time: {formatTime(trimEnd)}
                                 </label>
                                 <input
@@ -3226,8 +4364,12 @@ export default function VoiceClonePage() {
                                   step={0.01}
                                   value={trimEnd}
                                   onChange={(e) => setTrimEnd(parseFloat(e.target.value))}
-                                  className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                                  className="w-full h-4 bg-gray-200 rounded-lg appearance-none cursor-pointer slider hover:bg-gray-300 transition-colors"
+                                  title="Drag to adjust end time of selection"
                                 />
+                                <div className="text-xs text-blue-600 dark:text-blue-400 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  💡 Drag the blue handle to set where audio ends
+                                </div>
                               </div>
                             </div>
                             
@@ -3322,59 +4464,147 @@ export default function VoiceClonePage() {
                               </span>
                             </div>
                             
-                            <div className="flex items-center gap-3">
-                              <button
-                                onClick={() => {
-                                  // Stop any currently playing audio first
-                                  stopAllAudio()
-                                  
-                                  const audio = new Audio(importedAudioUrl!)
-                                  setCurrentPlayingAudio(audio)
-                                  setPlayingStates({ 'trimmer-preview': true })
-                                  
-                                  audio.onloadeddata = () => {
-                                    audio.currentTime = trimStart
-                                    audio.play().catch(e => console.error('Trimmer preview play error:', e))
-                                    
-                                    // Stop at trim end time
-                                    const duration = (trimEnd - trimStart) * 1000
-                                    setTimeout(() => {
-                                      audio.pause()
-                                      setCurrentPlayingAudio(null)
-                                      setPlayingStates({})
-                                    }, duration)
-                                  }
-                                  
-                                  audio.onended = () => {
-                                    setCurrentPlayingAudio(null)
-                                    setPlayingStates({})
-                                  }
-                                  
-                                  audio.onerror = (e) => {
-                                    console.error('Trimmer preview error:', e)
-                                    setCurrentPlayingAudio(null)
-                                    setPlayingStates({})
-                                    setError('Failed to play audio preview')
-                                  }
-                                }}
-                                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center gap-2"
-                              >
-                                <PlayIcon className="h-4 w-4" />
-                                Preview Selection
-                              </button>
-                              
-                              <button
-                                onClick={trimAudio}
-                                disabled={isProcessingFile}
-                                className="px-6 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white rounded-lg transition-colors flex items-center gap-2"
-                              >
-                                {isProcessingFile ? (
-                                  <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                            <div className="flex flex-col gap-3">
+                              {/* Audio Controls */}
+                              <div className="flex items-center gap-3">
+                                {!playingStates['trimmer-preview'] ? (
+                                  <button
+                                    onClick={() => {
+                                      // Stop any currently playing audio first
+                                      stopAllAudio()
+                                      
+                                      const audio = new Audio(importedAudioUrl!)
+                                      trimmedAudioRef.current = audio
+                                      setCurrentPlayingAudio(audio)
+                                      setPlayingStates({ 'trimmer-preview': true })
+                                      setPlaybackProgress(0)
+                                      
+                                      audio.onloadeddata = () => {
+                                        audio.currentTime = trimStart
+                                        audio.play().catch(e => console.error('Trimmer preview play error:', e))
+                                      }
+                                      
+                                      // Update progress during playback
+                                      const updateProgress = () => {
+                                        if (audio && !audio.paused && !audio.ended && playingStates['trimmer-preview']) {
+                                          const currentRelative = (audio.currentTime - trimStart) / (trimEnd - trimStart)
+                                          setPlaybackProgress(Math.max(0, Math.min(1, currentRelative)))
+                                          
+                                          console.log('🎵 Playback progress:', Math.round(currentRelative * 100) + '%', 'Time:', audio.currentTime.toFixed(2))
+                                          
+                                          // Redraw waveform with updated position indicator
+                                          setTimeout(() => drawWaveform(), 0)
+                                          
+                                          // Stop at trim end
+                                          if (audio.currentTime >= trimEnd) {
+                                            audio.pause()
+                                            setCurrentPlayingAudio(null)
+                                            setPlayingStates({})
+                                            setPlaybackProgress(0)
+                                            // Final waveform redraw without position indicator
+                                            setTimeout(() => drawWaveform(), 0)
+                                          } else {
+                                            requestAnimationFrame(updateProgress)
+                                          }
+                                        }
+                                      }
+                                      
+                                      // Start progress tracking
+                                      requestAnimationFrame(updateProgress)
+                                      
+                                      audio.onended = () => {
+                                        setCurrentPlayingAudio(null)
+                                        setPlayingStates({})
+                                        setPlaybackProgress(0)
+                                        // Redraw waveform without position indicator
+                                        drawWaveform()
+                                      }
+                                      
+                                      audio.onerror = (e) => {
+                                        console.error('Trimmer preview error:', e)
+                                        setCurrentPlayingAudio(null)
+                                        setPlayingStates({})
+                                        setPlaybackProgress(0)
+                                        setError('Failed to play audio preview')
+                                        // Redraw waveform without position indicator
+                                        drawWaveform()
+                                      }
+                                    }}
+                                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center gap-2"
+                                  >
+                                    <PlayIcon className="h-4 w-4" />
+                                    Play Selection
+                                  </button>
                                 ) : (
-                                  <CheckCircleIcon className="h-4 w-4" />
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => {
+                                        if (trimmedAudioRef.current) {
+                                          trimmedAudioRef.current.pause()
+                                        }
+                                        setCurrentPlayingAudio(null)
+                                        setPlayingStates({})
+                                        setPlaybackProgress(0)
+                                        // Redraw waveform without position indicator
+                                        drawWaveform()
+                                      }}
+                                      className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center gap-2"
+                                    >
+                                      <PauseIcon className="h-4 w-4" />
+                                      Pause
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        if (trimmedAudioRef.current) {
+                                          trimmedAudioRef.current.pause()
+                                          trimmedAudioRef.current.currentTime = trimStart
+                                        }
+                                        setCurrentPlayingAudio(null)
+                                        setPlayingStates({})
+                                        setPlaybackProgress(0)
+                                        // Redraw waveform without position indicator
+                                        drawWaveform()
+                                      }}
+                                      className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors flex items-center gap-2"
+                                    >
+                                      <StopIcon className="h-4 w-4" />
+                                      Stop
+                                    </button>
+                                  </div>
                                 )}
-                                Use Trimmed Audio
-                              </button>
+                              </div>
+                              
+                              {/* Progress Bar */}
+                              {playingStates['trimmer-preview'] && (
+                                <div className="w-full">
+                                  <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                                    <span>Playing Selection</span>
+                                    <span>{Math.round(playbackProgress * 100)}% complete</span>
+                                  </div>
+                                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                    <div 
+                                      className="bg-green-500 h-2 rounded-full transition-all duration-100 ease-linear"
+                                      style={{ width: `${playbackProgress * 100}%` }}
+                                    ></div>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Use Trimmed Audio Button */}
+                              <div className="flex justify-end">
+                                <button
+                                  onClick={trimAudio}
+                                  disabled={isProcessingFile}
+                                  className="px-6 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white rounded-lg transition-colors flex items-center gap-2"
+                                >
+                                  {isProcessingFile ? (
+                                    <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <CheckCircleIcon className="h-4 w-4" />
+                                  )}
+                                  Use Trimmed Audio
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -3407,13 +4637,23 @@ export default function VoiceClonePage() {
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Sample Name
                         </label>
-                        <input
-                          type="text"
-                          value={currentSampleName}
-                          onChange={(e) => setCurrentSampleName(e.target.value)}
-                          placeholder="e.g., Introduction Sample #1"
-                          className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                        />
+                    <input
+                      type="text"
+                      value={currentSampleName}
+                      onChange={(e) => setCurrentSampleName(e.target.value)}
+                      placeholder="Enter a name for this voice sample..."
+                      className={`w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                        !currentSampleName.trim() && (audioUrl || importedAudioUrl)
+                          ? 'border-red-300 dark:border-red-600 ring-1 ring-red-300 dark:ring-red-600'
+                          : 'border-gray-300 dark:border-gray-600'
+                      }`}
+                    />
+                    {!currentSampleName.trim() && (audioUrl || importedAudioUrl) && (
+                      <p className="text-red-600 dark:text-red-400 text-xs mt-1 flex items-center gap-1">
+                        <ExclamationTriangleIcon className="h-3 w-3" />
+                        Sample name is required to add this voice sample
+                      </p>
+                    )}
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -3541,69 +4781,205 @@ export default function VoiceClonePage() {
                       )}
                     </div>
                     
-                    {/* Recording Controls */}
-                    <div className="flex justify-center items-center gap-6 mb-8">
-                      {!isRecording ? (
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={startRecording}
-                          className="flex items-center justify-center w-20 h-20 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg transition-all duration-200"
-                        >
-                          <MicrophoneIcon className="h-8 w-8" />
-                        </motion.button>
-                      ) : (
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={stopRecording}
-                          className="flex items-center justify-center w-20 h-20 bg-gray-600 hover:bg-gray-700 text-white rounded-full shadow-lg recording-pulse"
-                        >
-                          <StopIcon className="h-8 w-8" />
-                        </motion.button>
-                      )}
-                      
-                      {audioUrl && (
-                        <div className="flex items-center gap-3">
+                    {/* Professional Recording Controls */}
+                    <div className="mb-8">
+                      <div className="flex justify-center items-center gap-6 mb-4">
+                        {!isRecording ? (
                           <motion.button
-                            initial={{ opacity: 0, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            onClick={() => toggleAudioPlayback(audioUrl, 'preview')}
-                            className="flex items-center justify-center w-16 h-16 bg-purple-500 hover:bg-purple-600 text-white rounded-full shadow-lg"
-                            title={playingStates['preview'] ? 'Pause Preview' : 'Play Preview'}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={startRecording}
+                            className="flex items-center justify-center w-24 h-24 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-full shadow-2xl transition-all duration-200 relative"
                           >
-                            {playingStates['preview'] ? (
-                              <PauseIcon className="h-6 w-6" />
-                            ) : (
-                              <PlayIcon className="h-6 w-6" />
-                            )}
+                            <MicrophoneIcon className="h-10 w-10" />
+                            <div className="absolute -bottom-2 text-xs font-medium">Record</div>
                           </motion.button>
-                          
-                          {(playingStates['preview'] || (currentPlayingAudio && !currentPlayingAudio.paused)) && (
+                        ) : (
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={stopRecording}
+                            className="flex items-center justify-center w-24 h-24 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-full shadow-2xl recording-pulse relative"
+                          >
+                            <StopIcon className="h-10 w-10" />
+                            <div className="absolute -bottom-2 text-xs font-medium">Stop</div>
+                          </motion.button>
+                        )}
+                        
+                        {audioUrl && (
+                          <>
+                            <motion.button
+                              initial={{ opacity: 0, x: 20 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              onClick={() => toggleAudioPlayback(audioUrl, 'preview')}
+                              className="flex items-center justify-center w-20 h-20 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-full shadow-xl transition-all relative"
+                              title={playingStates['preview'] ? 'Pause Preview' : 'Play Preview'}
+                            >
+                              {playingStates['preview'] ? (
+                                <PauseIcon className="h-8 w-8" />
+                              ) : (
+                                <PlayIcon className="h-8 w-8" />
+                              )}
+                              <div className="absolute -bottom-2 text-xs font-medium">Preview</div>
+                            </motion.button>
+                            
                             <motion.button
                               initial={{ opacity: 0, x: 25 }}
                               animate={{ opacity: 1, x: 0 }}
                               onClick={stopAllAudio}
-                              className="flex items-center justify-center w-12 h-12 bg-gray-500 hover:bg-gray-600 text-white rounded-full shadow-lg"
-                              title="Stop Preview"
+                              className="flex items-center justify-center w-16 h-16 bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-600 hover:to-gray-700 text-white rounded-full shadow-xl transition-all relative"
+                              title="Stop All Audio"
                             >
-                              <StopIcon className="h-5 w-5" />
+                              <StopIcon className="h-6 w-6" />
+                              <div className="absolute -bottom-2 text-xs font-medium">Stop</div>
                             </motion.button>
-                          )}
-                        </div>
-                      )}
+                            
+                            <motion.button
+                              initial={{ opacity: 0, x: 30 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              onClick={addVoiceSample}
+                              disabled={!currentSampleName.trim()}
+                              className="px-8 py-4 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 disabled:from-green-300 disabled:to-green-400 text-white rounded-xl font-bold transition-all flex items-center gap-3 shadow-xl relative"
+                            >
+                              <CloudArrowUpIcon className="h-6 w-6" />
+                              Add to Studio
+                            </motion.button>
+                          </>
+                        )}
+                      </div>
                       
-                      {audioUrl && (
-                        <motion.button
-                          initial={{ opacity: 0, x: 30 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          onClick={addVoiceSample}
-                          disabled={!currentSampleName.trim()}
-                          className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                      {/* Advanced Audio Player with Waveform Scrubbing */}
+                      {audioUrl && recordingWaveform.length > 0 && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 rounded-2xl p-6 border border-purple-300 dark:border-purple-700"
                         >
-                          <CloudArrowUpIcon className="h-5 w-5" />
-                          Add Sample
-                        </motion.button>
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                              <SpeakerWaveIcon className="h-5 w-5 text-purple-600" />
+                              Professional Audio Player
+                            </h4>
+                            <div className="flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
+                              <span>Duration: {formatTime(recordingTime)}</span>
+                              <span>Quality: {recordingQuality}</span>
+                              <span>Format: WebM/Opus</span>
+                            </div>
+                          </div>
+                          
+                          {/* Interactive Waveform with Scrubbing */}
+                          <div className="relative mb-4 group">
+                            <canvas
+                              width={800}
+                              height={120}
+                              className="w-full h-24 bg-gray-100 dark:bg-gray-800 rounded-lg cursor-pointer border-2 border-purple-200 dark:border-purple-700 hover:border-purple-400 transition-colors"
+                              onClick={(e) => {
+                                if (currentPlayingAudio && recordingTime > 0) {
+                                  const rect = e.currentTarget.getBoundingClientRect()
+                                  const x = e.clientX - rect.left
+                                  const clickTime = (x / rect.width) * recordingTime
+                                  currentPlayingAudio.currentTime = clickTime
+                                }
+                              }}
+                              ref={(canvas) => {
+                                if (canvas && recordingWaveform.length > 0) {
+                                  const ctx = canvas.getContext('2d')
+                                  if (ctx) {
+                                    // Draw waveform background
+                                    ctx.fillStyle = '#f3f4f6'
+                                    ctx.fillRect(0, 0, canvas.width, canvas.height)
+                                    
+                                    // Draw waveform bars
+                                    ctx.fillStyle = '#8b5cf6'
+                                    const barWidth = canvas.width / recordingWaveform.length
+                                    recordingWaveform.forEach((amplitude, i) => {
+                                      const barHeight = amplitude * canvas.height * 0.8
+                                      const y = (canvas.height - barHeight) / 2
+                                      ctx.fillRect(i * barWidth, y, Math.max(barWidth - 1, 1), barHeight)
+                                    })
+                                    
+                                    // Draw playback progress if playing
+                                    if (currentPlayingAudio && playingStates['preview'] && recordingTime > 0) {
+                                      const progress = currentPlayingAudio.currentTime / recordingTime
+                                      const progressX = progress * canvas.width
+                                      
+                                      // Progress overlay
+                                      ctx.fillStyle = 'rgba(139, 92, 246, 0.3)'
+                                      ctx.fillRect(0, 0, progressX, canvas.height)
+                                      
+                                      // Progress line
+                                      ctx.strokeStyle = '#7c3aed'
+                                      ctx.lineWidth = 3
+                                      ctx.beginPath()
+                                      ctx.moveTo(progressX, 0)
+                                      ctx.lineTo(progressX, canvas.height)
+                                      ctx.stroke()
+                                    }
+                                  }
+                                }
+                              }}
+                            />
+                            
+                            {/* Scrubbing tooltip */}
+                            <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                              Click anywhere to seek • Drag to scrub
+                            </div>
+                          </div>
+                          
+                          {/* Transport Controls */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => {
+                                  if (currentPlayingAudio) {
+                                    currentPlayingAudio.currentTime = Math.max(0, currentPlayingAudio.currentTime - 10)
+                                  }
+                                }}
+                                className="p-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                                title="Skip back 10 seconds"
+                              >
+                                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
+                                </svg>
+                                -10s
+                              </button>
+                              
+                              <button
+                                onClick={() => toggleAudioPlayback(audioUrl, 'preview')}
+                                className="p-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl transition-colors"
+                              >
+                                {playingStates['preview'] ? (
+                                  <PauseIcon className="h-6 w-6" />
+                                ) : (
+                                  <PlayIcon className="h-6 w-6" />
+                                )}
+                              </button>
+                              
+                              <button
+                                onClick={() => {
+                                  if (currentPlayingAudio) {
+                                    currentPlayingAudio.currentTime = Math.min(recordingTime, currentPlayingAudio.currentTime + 10)
+                                  }
+                                }}
+                                className="p-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                                title="Skip forward 10 seconds"
+                              >
+                                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
+                                </svg>
+                                +10s
+                              </button>
+                            </div>
+                            
+                            <div className="flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
+                              <span>🎵 Ready to add to voice clone</span>
+                              <div className="flex items-center gap-1">
+                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                <span>High Quality</span>
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
                       )}
                     </div>
                     
@@ -3643,14 +5019,35 @@ export default function VoiceClonePage() {
                               </div>
                               <div className="flex items-center gap-2">
                                 <button
-                                  onClick={() => toggleAudioPlayback(sample.audioUrl, sample.id)}
-                                  className="p-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
-                                  title={playingStates[sample.id] ? 'Pause' : 'Play'}
+                                  onClick={() => {
+                                    if (sample.audioUrl) {
+                                      toggleAudioPlayback(sample.audioUrl, sample.id)
+                                    } else {
+                                      setError('Audio not available - sample was recorded in a previous session. Audio playback is only available in the same session or if stored on backend.')
+                                      setTimeout(() => setError(null), 5000)
+                                    }
+                                  }}
+                                  className={`p-2 text-white rounded-lg transition-colors ${
+                                    sample.audioUrl 
+                                      ? 'bg-purple-600 hover:bg-purple-700' 
+                                      : 'bg-gray-400 cursor-not-allowed'
+                                  }`}
+                                  title={
+                                    sample.audioUrl 
+                                      ? (playingStates[sample.id] ? 'Pause' : 'Play') 
+                                      : 'Audio not available - recorded in previous session'
+                                  }
                                 >
-                                  {playingStates[sample.id] ? (
-                                    <PauseIcon className="h-4 w-4" />
+                                  {sample.audioUrl ? (
+                                    playingStates[sample.id] ? (
+                                      <PauseIcon className="h-4 w-4" />
+                                    ) : (
+                                      <PlayIcon className="h-4 w-4" />
+                                    )
                                   ) : (
-                                    <PlayIcon className="h-4 w-4" />
+                                    <div className="h-4 w-4 flex items-center justify-center">
+                                      <span className="text-xs">⏸</span>
+                                    </div>
                                   )}
                                 </button>
                                 
@@ -3698,15 +5095,48 @@ export default function VoiceClonePage() {
                   <UserIcon className="h-6 w-6 text-purple-600" />
                   Your Voice Clones ({voiceClones.length})
                 </h2>
-                <button
-                  onClick={reconcileWithBackend}
-                  disabled={isProcessing}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
-                  title="Sync with backend to check for new voice clones"
-                >
-                  <ArrowPathIcon className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
-                  {isProcessing ? 'Syncing...' : 'Sync Backend'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={testSaveLoadProcess}
+                    className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg transition-colors"
+                    title="Test if save/load process works correctly"
+                  >
+                    🧪 Test Save
+                  </button>
+                  <button
+                    onClick={debugCloneStatus}
+                    className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded-lg transition-colors"
+                    title="Debug: Show clone status in console"
+                  >
+                    🔍 Debug
+                  </button>
+                  <button
+                    onClick={forceReUploadAllClones}
+                    disabled={isProcessing || voiceClones.length === 0}
+                    className="px-3 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white text-xs rounded-lg transition-colors"
+                    title="Force re-upload all clones (resets sync status first)"
+                  >
+                    🔄 Force Re-upload
+                  </button>
+                  <button
+                    onClick={manualSyncClonesToBackend}
+                    disabled={isProcessing || voiceClones.filter(c => !c.backendSynced).length === 0}
+                    className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+                    title={voiceClones.filter(c => !c.backendSynced).length === 0 ? 'All clones already synced' : `Upload ${voiceClones.filter(c => !c.backendSynced).length} unsynced clones to backend`}
+                  >
+                    <ArrowUpTrayIcon className={`h-4 w-4 ${isProcessing ? 'animate-bounce' : ''}`} />
+                    {isProcessing ? 'Uploading...' : `Upload ${voiceClones.filter(c => !c.backendSynced).length} Clones`}
+                  </button>
+                  <button
+                    onClick={reconcileWithBackend}
+                    disabled={isProcessing}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+                    title="Sync with backend to check for new voice clones"
+                  >
+                    <ArrowPathIcon className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                    {isProcessing ? 'Syncing...' : 'Sync Backend'}
+                  </button>
+                </div>
               </div>
               
               {voiceClones.length === 0 ? (
@@ -3757,83 +5187,273 @@ export default function VoiceClonePage() {
                         {clone.description || 'No description provided'}
                       </p>
                       
-                      <div className="grid grid-cols-2 gap-4 mb-6">
-                        <div className="text-center">
+                      {/* Voice Clone Statistics */}
+                      <div className="grid grid-cols-3 gap-4 mb-6">
+                        <div className="text-center bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-600">
                           <div className="text-2xl font-bold text-purple-600">
                             {clone.samples.length}
                           </div>
-                          <div className="text-xs text-gray-500">Samples</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Voice Samples</div>
                         </div>
-                        <div className="text-center">
+                        <div className="text-center bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-600">
                           <div className="text-2xl font-bold text-green-600">
-                            {Math.round(clone.samples.reduce((acc, sample) => acc + sample.quality, 0) / Math.max(clone.samples.length, 1) * 100)}%
+                            {clone.samples.length > 0 ? Math.round(clone.samples.reduce((acc, sample) => acc + sample.quality, 0) / clone.samples.length * 100) : 0}%
                           </div>
-                          <div className="text-xs text-gray-500">Quality</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Avg Quality</div>
+                        </div>
+                        <div className="text-center bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-600">
+                          <div className="text-2xl font-bold text-blue-600">
+                            {(() => {
+                              if (clone.samples.length === 0) return '0s'
+                              const totalSeconds = clone.samples.reduce((acc, sample) => acc + (sample.duration || 0), 0)
+                              const minutes = Math.floor(totalSeconds / 60)
+                              const seconds = Math.round(totalSeconds % 60)
+                              return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+                            })()}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Total Audio</div>
                         </div>
                       </div>
+                      
+                      {/* Additional Statistics Row */}
+                      {clone.samples.length > 0 && (
+                        <div className="grid grid-cols-2 gap-4 mb-4">
+                          <div className="text-center bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 rounded-lg p-2 border border-purple-200 dark:border-purple-700">
+                            <div className="text-lg font-semibold text-purple-700 dark:text-purple-300">
+                              {Math.round(clone.samples.reduce((acc, sample) => acc + sample.duration, 0))}s
+                            </div>
+                            <div className="text-xs text-purple-600 dark:text-purple-400">Total Duration</div>
+                          </div>
+                          <div className="text-center bg-gradient-to-r from-green-50 to-teal-50 dark:from-green-900/20 dark:to-teal-900/20 rounded-lg p-2 border border-green-200 dark:border-green-700">
+                            <div className="text-lg font-semibold text-green-700 dark:text-green-300">
+                              {clone.samples.filter(s => s.quality >= 0.8).length}/{clone.samples.length}
+                            </div>
+                            <div className="text-xs text-green-600 dark:text-green-400">High Quality</div>
+                          </div>
+                        </div>
+                      )}
                       
                       <div className="space-y-2">
                         {/* Cached Test Audio Section */}
                         {clone.cachedTestAudio && (
                           <div className="p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700/50 rounded-lg">
-                            <div className="text-xs text-blue-700 dark:text-blue-300 font-medium mb-2 flex items-center gap-2">
-                              📋 Cached Test Audio
+                            <div className="text-xs text-blue-700 dark:text-blue-300 font-medium mb-2 flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                📋 Cached Test Audio
+                                {clone.cachedTestAudio.isCustomText && (
+                                  <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-800 text-purple-700 dark:text-purple-300 text-xs rounded-full">
+                                    Custom
+                                  </span>
+                                )}
+                              </div>
                               <span className="text-blue-500 dark:text-blue-400">
-                                ({new Date(clone.cachedTestAudio.testedAt * 1000).toLocaleDateString()})
+                                {new Date(clone.cachedTestAudio.testedAt * 1000).toLocaleDateString()}
                               </span>
                             </div>
-                            <div className="text-xs text-blue-600 dark:text-blue-400 mb-2 italic">
-                              "{clone.cachedTestAudio.text.substring(0, 60)}{clone.cachedTestAudio.text.length > 60 ? '...' : ''}"
-                            </div>
-                            <button
-                              onClick={() => playCachedTestAudio(clone)}
-                              className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
-                              title="Play the cached test audio from previous test"
-                            >
-                              {playingStates[`cached_test_${clone.id}`] ? (
-                                <>
-                                  <PauseIcon className="h-4 w-4" />
-                                  Playing Cached...
-                                </>
-                              ) : (
-                                <>
-                                  <PlayIcon className="h-4 w-4" />
-                                  🔁 Play Last Test
-                                </>
+                            
+                            {/* Expandable Text Display */}
+                            <div className="mb-2">
+                              <div className="text-xs text-blue-600 dark:text-blue-400 italic">
+                                "{expandedCachedText[clone.id] 
+                                  ? clone.cachedTestAudio.text 
+                                  : `${clone.cachedTestAudio.text.substring(0, 60)}${clone.cachedTestAudio.text.length > 60 ? '...' : ''}`
+                                }"
+                              </div>
+                              {clone.cachedTestAudio.text.length > 60 && (
+                                <button
+                                  onClick={() => setExpandedCachedText(prev => ({ ...prev, [clone.id]: !prev[clone.id] }))}
+                                  className="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-200 mt-1"
+                                >
+                                  {expandedCachedText[clone.id] ? 'Show less' : 'Show full text'}
+                                </button>
                               )}
-                            </button>
+                            </div>
+                            
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => playCachedTestAudio(clone)}
+                                className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
+                                title="Play the cached test audio from previous test"
+                              >
+                                {playingStates[`cached_test_${clone.id}`] ? (
+                                  <>
+                                    <PauseIcon className="h-4 w-4" />
+                                    Pause
+                                  </>
+                                ) : (
+                                  <>
+                                    <PlayIcon className="h-4 w-4" />
+                                    🔁 Play Last Test
+                                  </>
+                                )}
+                              </button>
+                              {clone.cachedTestAudio.isCustomText && clone.customTestText && (
+                                <button
+                                  onClick={() => {
+                                    setCustomTestText(clone.customTestText || '')
+                                    setCurrentCustomTestClone(clone)
+                                    setShowCustomTestInput(true)
+                                  }}
+                                  className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors"
+                                  title="Reuse this custom test text"
+                                >
+                                  <DocumentDuplicateIcon className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Custom Test Text Input */}
+                        {showCustomTestInput && (
+                          <div className="mb-4 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg">
+                            <div className="flex items-center justify-between mb-3">
+                              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Custom Test Text for {(currentCustomTestClone || clone).name}
+                              </label>
+                              <button
+                                onClick={() => {
+                                  setShowCustomTestInput(false)
+                                  setCurrentCustomTestClone(null)
+                                }}
+                                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                              >
+                                <XMarkIcon className="h-4 w-4" />
+                              </button>
+                            </div>
+                            <div className="space-y-3">
+                              <textarea
+                                value={customTestText}
+                                onChange={(e) => setCustomTestText(e.target.value)}
+                                placeholder="Enter custom text for voice clone testing..."
+                                rows={3}
+                                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-sm"
+                              />
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    const targetClone = currentCustomTestClone || clone
+                                    if (currentTestingClone === targetClone.id) {
+                                      stopVoiceCloneTest(targetClone.id)
+                                    } else {
+                                      console.log(`🎵 Test with Custom Text clicked for: ${targetClone.name}`)
+                                      console.log(`Custom text: "${customTestText}"`)
+                                      console.log(`Target clone samples: ${targetClone.samples.length}, backendSynced: ${targetClone.backendSynced}`)
+                                      testVoiceClone(targetClone, customTestText)
+                                    }
+                                  }}
+                                  disabled={(isProcessing && currentTestingClone !== (currentCustomTestClone || clone).id) || !customTestText.trim() || ((currentCustomTestClone || clone).samples.length === 0 && !(currentCustomTestClone || clone).backendSynced)}
+                                  className={`px-3 py-2 text-white text-xs rounded-lg transition-colors flex items-center gap-2 ${
+                                    currentTestingClone === (currentCustomTestClone || clone).id
+                                      ? 'bg-red-600 hover:bg-red-700'
+                                      : 'bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed'
+                                  }`}
+                                >
+                                  {currentTestingClone === (currentCustomTestClone || clone).id ? (
+                                    <>
+                                      <StopIcon className="h-3 w-3" />
+                                      Stop Test
+                                    </>
+                                  ) : (
+                                    <>
+                                      <PlayIcon className="h-3 w-3" />
+                                      Test with Custom Text
+                                    </>
+                                  )}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (!isSTTForTest) {
+                                      setIsSTTForTest(true)
+                                      // Here you would implement STT for custom test text
+                                      setError('🎤 STT for custom test text coming soon! For now, please type your test text.')
+                                      setTimeout(() => setError(null), 4000)
+                                    }
+                                  }}
+                                  disabled={isSTTForTest}
+                                  className="px-3 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white text-xs rounded-lg transition-colors flex items-center gap-2"
+                                >
+                                  <MicrophoneIcon className="h-3 w-3" />
+                                  {isSTTForTest ? 'Recording...' : 'Voice Input'}
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         )}
                         
                         {/* Action Buttons */}
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => {
-                              setCurrentClone(clone)
-                              setActiveTab('create')
-                            }}
-                            className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => testVoiceClone(clone)}
-                            disabled={isProcessing || clone.samples.length === 0 || !clone.backendSynced}
-                            className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white text-sm rounded-lg transition-colors"
-                            title={
-                              !clone.backendSynced ? 'Voice clone must be synced with backend to test' :
-                              clone.samples.length === 0 ? 'Voice clone needs voice samples to test' :
-                              'Test this voice clone with VibeVoice'
-                            }
-                          >
-                            {!clone.backendSynced ? '🔄 Sync First' : clone.cachedTestAudio ? 'New Test' : 'Test'}
-                          </button>
-                          <button
-                            onClick={() => deleteVoiceClone(clone.id)}
-                            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors"
-                          >
-                            <TrashIcon className="h-4 w-4" />
-                          </button>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                setCurrentClone(clone)
+                                setActiveTab('create')
+                              }}
+                              className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault()
+                                if (currentTestingClone === clone.id) {
+                                  stopVoiceCloneTest(clone.id)
+                                } else {
+                                  console.log(`📏 Quick Test clicked for: ${clone.name}`)
+                                  console.log(`Clone samples: ${clone.samples.length}, backendSynced: ${clone.backendSynced}`)
+                                  testVoiceClone(clone)
+                                }
+                              }}
+                              disabled={(isProcessing && currentTestingClone !== clone.id) || (clone.samples.length === 0 && !clone.backendSynced)}
+                              className={`px-4 py-2 text-white text-sm rounded-lg transition-colors flex items-center gap-1 ${
+                                currentTestingClone === clone.id
+                                  ? 'bg-red-600 hover:bg-red-700'
+                                  : 'bg-green-600 hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed'
+                              }`}
+                              title={
+                                currentTestingClone === clone.id ? 'Stop testing voice clone' :
+                                (clone.samples.length === 0 && !clone.backendSynced) ? 'Voice clone needs voice samples to test' :
+                                clone.backendSynced ? 'Test this voice clone with VibeVoice' :
+                                'Test voice clone (will try backend connection)'
+                              }
+                            >
+                              {currentTestingClone === clone.id ? (
+                                <>
+                                  <StopIcon className="h-3 w-3" />
+                                  Stop Test
+                                </>
+                              ) : isProcessing && currentTestingClone === clone.id ? (
+                                'Testing...'
+                              ) : (
+                                clone.cachedTestAudio ? 'Quick Test' : clone.backendSynced ? 'Test Voice' : '🎵 Test Voice'
+                              )}
+                            </button>
+                            <button
+                              onClick={() => deleteVoiceClone(clone.id)}
+                              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors"
+                            >
+                              <TrashIcon className="h-4 w-4" />
+                            </button>
+                          </div>
+                          {/* Custom Test Button */}
+                          {!showCustomTestInput && (
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault()
+                                console.log(`📝 Custom Text Test clicked for: ${clone.name}`)
+                                console.log(`Clone samples: ${clone.samples.length}, backendSynced: ${clone.backendSynced}`)
+                                setShowCustomTestInput(true)
+                                setCurrentCustomTestClone(clone)
+                              }}
+                              disabled={isProcessing || (clone.samples.length === 0 && !clone.backendSynced)}
+                              className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
+                              title={(clone.samples.length === 0 && !clone.backendSynced) ? 'Voice clone needs samples to test' : 'Test with custom text instead of default message'}
+                            >
+                              <DocumentDuplicateIcon className="h-4 w-4" />
+                              Custom Test Text
+                            </button>
+                          )}
                         </div>
                       </div>
                     </motion.div>
@@ -4017,14 +5637,22 @@ export default function VoiceClonePage() {
                         </div>
                       )}
                       
-                      {/* Real Sample Badge */}
-                      {availableRealSamples[voice.id] && (
-                        <div className={`absolute ${voice.featured ? 'top-10' : 'top-4'} left-4`}>
+                      {/* Voice Quality Badges */}
+                      <div className={`absolute ${voice.featured ? 'top-10' : 'top-4'} left-4 space-y-1`}>
+                        {availableRealSamples[voice.id] ? (
                           <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded-full font-semibold flex items-center gap-1" title="Authentic voice sample available">
                             🎤 Real Sample
                           </span>
-                        </div>
-                      )}
+                        ) : voice.ttsConfig ? (
+                          <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded-full font-semibold flex items-center gap-1" title="Modern TTS available - authentic voice quality">
+                            🎵 Modern TTS
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 text-xs rounded-full font-semibold flex items-center gap-1" title="System approximation only - may not represent true voice quality">
+                            ⚠️ Approximation
+                          </span>
+                        )}
+                      </div>
                       
                       {/* Favorite Button */}
                       <button
@@ -4134,7 +5762,9 @@ export default function VoiceClonePage() {
                               ) : (
                                 <>
                                   <PlayIcon className="h-4 w-4" />
-                                  {availableRealSamples[voice.id] ? '🎤 Test Real Voice' : 'Test Voice'}
+                                  {availableRealSamples[voice.id] ? '🎤 Authentic Sample' : 
+                                   voice.ttsConfig ? '🎵 Modern TTS' : 
+                                   '⚠️ System Approx'}
                                 </>
                               )}
                             </button>
@@ -4228,8 +5858,18 @@ export default function VoiceClonePage() {
                       value={newCloneName}
                       onChange={(e) => setNewCloneName(e.target.value)}
                       placeholder="e.g., My Professional Voice"
-                      className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className={`w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
+                        !newCloneName.trim()
+                          ? 'border-red-300 dark:border-red-600 ring-1 ring-red-300 dark:ring-red-600'
+                          : 'border-gray-300 dark:border-gray-600'
+                      }`}
                     />
+                    {!newCloneName.trim() && (
+                      <p className="text-red-600 dark:text-red-400 text-xs mt-1 flex items-center gap-1">
+                        <ExclamationTriangleIcon className="h-3 w-3" />
+                        Voice clone name is required
+                      </p>
+                    )}
                   </div>
                   
                   <div>

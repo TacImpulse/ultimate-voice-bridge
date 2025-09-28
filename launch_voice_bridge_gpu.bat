@@ -105,23 +105,27 @@ echo ===============================================
 echo RTX 5090 GPU ACCELERATED VOICE BRIDGE
 echo ===============================================
 echo.
-echo [BACKEND] Backend:  http://localhost:8001
+echo [BACKEND] Backend:  http://localhost:8000
 echo [FRONTEND] Frontend: http://localhost:3000  
+echo [MAIN] Main Dashboard: http://localhost:3000
 echo [VOICE] Voice Chat: http://localhost:3000/voice
+echo [CONVERSATION] Conversation Engine: http://localhost:3000/conversation-engine
+echo [CLONES] Voice Clones: http://localhost:3000/voice-clone
 echo.
 echo [PERFORMANCE] RTX 5090 Benefits:
 echo   * 7-11x faster voice generation
 echo   * Real-time GPU acceleration
 echo   * Optimized batch processing
+echo   * Enhanced multi-speaker conversations
 echo.
 echo [SUCCESS] Both services should now be running!
 echo Check the backend and frontend windows for status.
 echo.
 
-REM Open the voice interface in browser
-echo [WEB] Opening voice interface in 5 seconds...
+REM Open the main dashboard in browser
+echo [WEB] Opening main dashboard in 5 seconds...
 timeout /t 5 /nobreak >nul
-start http://localhost:3000/voice
+start http://localhost:3000
 
 echo.
 echo [READY] RTX 5090 GPU ACCELERATION ACTIVE!

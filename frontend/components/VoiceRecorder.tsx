@@ -1915,7 +1915,7 @@ export default function VoiceRecorder() {
                 
                 {/* Process Button */}
                 <button
-                  onClick={processTextInput}
+                  onClick={() => processTextInput()}
                   disabled={(!textInput.trim() && uploadedFiles.length === 0) || isLlmProcessing}
                   className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
                 >

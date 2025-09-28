@@ -266,7 +266,7 @@ export default function HomePage() {
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.9 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-12"
           >
             {[
               {
@@ -277,7 +277,7 @@ export default function HomePage() {
                 href: '/voice'
               },
               {
-                icon: '🎭',
+                icon: '🎤',
                 title: 'Voice Cloning',
                 desc: 'VibeVoice-powered voice synthesis',
                 color: 'from-purple-500 to-indigo-500',
@@ -289,6 +289,13 @@ export default function HomePage() {
                 desc: 'LM Studio LLM integration',
                 color: 'from-blue-500 to-cyan-500',
                 href: '/test'
+              },
+              {
+                icon: '🎭',
+                title: 'Multi-Speaker',
+                desc: 'Dynamic conversations with emotions',
+                color: 'from-pink-500 to-rose-500',
+                href: '/conversation'
               },
               {
                 icon: '📊',

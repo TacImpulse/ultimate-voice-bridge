@@ -38,7 +38,7 @@ def setup_cuda_environment():
     os.environ["DS_BUILD_AIO"] = "0"      # Async I/O not supported on Windows
     os.environ["DS_BUILD_GDS"] = "0"      # GPU Direct Storage not supported on Windows
     
-    print("✅ CUDA environment configured:")
+    print("[OK] CUDA environment configured:")
     print(f"   CUDA_HOME: {cuda_home}")
     print(f"   NVCC available: {os.path.exists(os.path.join(cuda_bin, 'nvcc.exe'))}")
     print(f"   GPU Architecture: {os.environ.get('TORCH_CUDA_ARCH_LIST')}")
